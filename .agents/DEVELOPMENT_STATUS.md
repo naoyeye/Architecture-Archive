@@ -1,5 +1,19 @@
 # Development Status
 
+## 2026-09-30 | Phase: 文件夹图标失败日志 | Status: 完成
+
+- **目标**: 图标脚本失败时在任务日志与 stage detail 中展示 stderr，避免截断的 CalledProcessError 命令行误导。
+- **变更**: server/app.py 新增 `_folder_icon_failure_detail`；`_apply_folder_icon` 捕获失败时使用 stderr/stdout。server/test_app.py 增加回归测试。
+- **验证**: `python -m unittest test_app.ServerTests.test_apply_folder_icon_logs_script_stderr_on_failure` 通过。
+- **下一步**: 无。
+
+## 2026-09-30 | Phase: 文件夹图标依赖文档 | Status: 完成
+
+- **目标**: 在 server/README.md 写明自动套用 Finder 目录图标所需的 ImageMagick 与 fileicon 安装方式。
+- **变更**: 「抓取后自动套用目录图标」下新增「系统依赖（macOS）」小节，含 brew 命令、PATH 校验与失败对主流程的影响说明。
+- **验证**: 文档与 set_case_folder_icons.sh 头部注释一致。
+- **下一步**: 无。
+
 ## 2026-09-30 | Phase: 项目目录更名 | Status: 完成
 
 - **目标**: 将已支持多个建筑网站的项目目录从 Dezeen 更名为 Architecture-Archive，并保持本地服务路径配置有效。

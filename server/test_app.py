@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,6 +92,24 @@ class ServerTests(unittest.TestCase):
                 server._run_job(job_id, DWELL_URL, article_data=snapshot())
             self.assertEqual(server._snapshot(job_id)['status'], 'error')
             translate.assert_not_called()
+
+    def test_apply_folder_icon_logs_script_stderr_on_failure(self):
+        job_id = server._new_job()
+        stderr = "Missing 'fileicon'. Install first: brew install fileicon"
+        with patch.object(server, 'AUTO_SET_FOLDER_ICON', True), \
+                patch.object(server, 'ICON_SCRIPT') as icon_script, \
+                patch.object(
+                    server.subprocess,
+                    'run',
+                    side_effect=subprocess.CalledProcessError(1, ['icon.sh'], stderr=stderr),
+                ):
+            icon_script.exists.return_value = True
+            server._apply_folder_icon(Path('/tmp/case-dir'), job_id)
+        result = server._snapshot(job_id)
+        folder_stage = next(s for s in result['stages'] if s['key'] == 'folder_icon')
+        self.assertEqual(folder_stage['state'], 'error')
+        self.assertEqual(folder_stage['detail'], stderr)
+        self.assertTrue(any(stderr in line for line in result['logs']))
 
 
 if __name__ == '__main__':

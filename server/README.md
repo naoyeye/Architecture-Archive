@@ -114,6 +114,19 @@ python refine_meta.py --all --root /path/to/projects --apply --rename
 
 默认开启：每次任务写完 `article.zh.md` 后，会调用 `server/set_case_folder_icons.sh`（对 `projects/` 传 `--root`，对当前案例目录传 `--test-dir`）自动套用 Finder 文件夹图标。
 
+### 系统依赖（macOS）
+
+自动套用与手动运行脚本均依赖本机已安装的可执行文件（仅 macOS + Finder 有意义）：
+
+| 工具 | 用途 | 安装 |
+|------|------|------|
+| ImageMagick | 合成文件夹预览图（`magick`） | `brew install imagemagick` |
+| fileicon | 将 PNG 写入 Finder 文件夹图标 | `brew install fileicon` |
+
+安装后可用 `command -v magick fileicon` 确认 PATH 中能找到二者。脚本还会使用系统自带的 `sips`（可选，用于读取 macOS 系统文件夹图标）。未安装上述依赖时脚本会失败并在任务日志的「设置文件夹图标」阶段报错，**不影响**解析、下载与 Markdown 写入。
+
+若通过 LaunchAgent 跑服务，`com.architecture.archive.plist` 的 `PATH` 已包含 `/usr/local/bin`；Homebrew 装在本机默认前缀下即可。
+
 手动补跑（在 `server/` 下执行， `--root` 指向案例根目录）：
 
 ```bash

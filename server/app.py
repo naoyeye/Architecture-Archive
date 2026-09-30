@@ -184,6 +184,26 @@ def _raise_if_cancelled(job_id: str) -> None:
         raise RuntimeError("Job cancelled by user")
 
 
+def _folder_icon_failure_detail(exc: BaseException, *, limit: int = 500) -> str:
+    """Prefer script stderr over repr(CalledProcessError) for task logs."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        for stream in (exc.stderr, exc.stdout):
+            if stream and str(stream).strip():
+                text = str(stream).strip()
+                break
+        else:
+            text = f"exit {exc.returncode}"
+        if len(text) > limit:
+            return text[: limit - 1] + "…"
+        return text
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"超时 ({exc.timeout}s)"
+    text = str(exc).strip() or type(exc).__name__
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
 def _apply_folder_icon(out_dir: Path, job_id: str) -> None:
     """Apply folder icon for one case dir; never raise to caller."""
     if not AUTO_SET_FOLDER_ICON:
@@ -213,13 +233,13 @@ def _apply_folder_icon(out_dir: Path, job_id: str) -> None:
         _job_log(job_id, "自动套用文件夹图标: 完成")
         _update_stage(job_id, "folder_icon", state="done")
     except Exception as e:
-        _job_log(job_id, f"自动套用文件夹图标: 失败 {type(e).__name__}: {str(e)[:160]}")
-        _update_stage(
-            job_id,
-            "folder_icon",
-            state="error",
-            detail=f"{type(e).__name__}: {str(e)[:160]}",
-        )
+        detail = _folder_icon_failure_detail(e)
+        if isinstance(e, subprocess.CalledProcessError):
+            prefix = f"自动套用文件夹图标: 失败 (exit {e.returncode})"
+        else:
+            prefix = f"自动套用文件夹图标: 失败 {type(e).__name__}"
+        _job_log(job_id, f"{prefix} {detail}")
+        _update_stage(job_id, "folder_icon", state="error", detail=detail)
 
 
 def _refine_building_studio(job_id: str, article) -> None:
