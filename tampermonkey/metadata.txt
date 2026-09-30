@@ -1,0 +1,26 @@
+// ==UserScript==
+// @name         Architecture Archive + Chinese Translation
+// @namespace    ArchitectureArchive
+// @version      2026-09-28.2
+// @description  Archive Dezeen, Dwell, Archello and ArchDaily projects with images and Chinese translation
+// @author       Jiyun
+// @match        https://www.dezeen.com/*
+// @match        https://dezeen.com/*
+// @exclude      https://www.dezeen.com/
+// @exclude      https://www.dezeen.com
+// @exclude      https://dezeen.com/
+// @exclude      https://dezeen.com
+// @exclude      https://www.dwell.com/
+// @exclude      https://www.dwell.com
+// @exclude      https://dwell.com/
+// @exclude      https://dwell.com
+// @match        https://www.dwell.com/home/*
+// @match        https://www.dwell.com/article/*
+// @match        https://archello.com/project/*
+// @match        https://www.archdaily.com/*
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @run-at       document-start
+// @updateURL    http://127.0.0.1:8765/script.user.js
+// @downloadURL  http://127.0.0.1:8765/script.user.js
+// ==/UserScript==

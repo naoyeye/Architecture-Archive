@@ -1,0 +1,17 @@
+{
+  "name": "architecture-archive",
+  "private": true,
+  "scripts": {
+    "build": "node tampermonkey/build.mjs",
+    "dev": "node tampermonkey/build.mjs --watch",
+    "check": "npm run build && node --check tampermonkey/architecture-archive.user.js",
+    "test": "npm run build && node --test server/test_*.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "linkedom": "0.18.12"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

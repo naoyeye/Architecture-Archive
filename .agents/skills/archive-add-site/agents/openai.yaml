@@ -1,0 +1,4 @@
+interface:
+  display_name: "新增归档站点"
+  short_description: "为 Architecture Archive 接入新站点并验证原图与正文完整性"
+  default_prompt: "使用 $archive-add-site，为 Architecture Archive 增加指定网站的抓取支持，并验证已有站点不受影响。"

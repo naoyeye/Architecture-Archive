@@ -1,0 +1,42 @@
+# User-created archive data
+/projects/
+
+# JavaScript dependencies and generated reports
+/node_modules/
+/coverage/
+npm-debug.log*
+
+# Python environments, caches, and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime and editor files
+*.log
+*.pid
+.cache/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

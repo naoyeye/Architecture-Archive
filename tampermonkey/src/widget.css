@@ -1,0 +1,247 @@
+html[data-archive-site="dezeen"] body {
+  font-family: Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+}
+html[data-archive-site="dezeen"] .main-header {
+  visibility: hidden !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+html[data-archive-site="dezeen"] .right-column {
+  display: none !important;
+}
+html[data-archive-site="dezeen"] .header-scroll .carousel-wrap,
+html[data-archive-site="dezeen"] .header-scroll.single .page-columns {
+  padding-top: 0 !important;
+}
+html[data-archive-site="dezeen"] #preload-hero.hero-image {
+  max-width: none !important;
+}
+@media (min-width: 768px) {
+  html[data-archive-site="dezeen"] .main-article-body > p {
+    max-width: none !important;
+  }
+  html[data-archive-site="dezeen"] .page-columns {
+    max-width: 70vw;
+    margin: 0 auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- scraper widget ---- */
+#archive-scraper {
+  position: fixed;
+  right: 16px;
+  top: 40%;
+  z-index: 2147483647;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: #111;
+}
+#archive-scraper :where(button) {
+  all: unset;
+  box-sizing: border-box;
+  appearance: none;
+  display: inline-block;
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+#archive-scraper button:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 3px;
+}
+#archive-scraper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #111;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  transition: transform .15s ease, background .15s ease;
+}
+#archive-scraper-btn:hover { transform: scale(1.05); background: #222; }
+#archive-scraper-btn[disabled] { opacity: .65; cursor: progress; }
+
+#archive-scraper-panel {
+  display: none;
+  position: absolute;
+  right: 68px;
+  top: 0;
+  width: 320px;
+  background: #fff;
+  border: 1px solid #eaeaea;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.18);
+  padding: 14px 16px 12px;
+  font-size: 13px;
+}
+#archive-scraper-panel.open { display: block; }
+#archive-scraper-panel h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: #111;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#archive-scraper-panel .archive-close {
+  cursor: pointer;
+  color: #888;
+  font-size: 16px;
+  line-height: 1;
+}
+#archive-scraper-panel .archive-close:hover { color: #111; }
+#archive-scraper-panel ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#archive-scraper-panel li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  color: #555;
+}
+#archive-scraper-panel li.done    { color: #1a7f37; }
+#archive-scraper-panel li.running { color: #111; font-weight: 600; }
+#archive-scraper-panel li.error   { color: #b42318; font-weight: 600; }
+#archive-scraper-panel .archive-icon {
+  width: 14px; height: 14px;
+  display: inline-block;
+  flex: 0 0 14px;
+  border-radius: 50%;
+  background: #d0d7de;
+  position: relative;
+}
+#archive-scraper-panel li.done .archive-icon {
+  background: #1a7f37;
+}
+#archive-scraper-panel li.done .archive-icon::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+#archive-scraper-panel li.error .archive-icon { background: #b42318; }
+#archive-scraper-panel li.error .archive-icon::after {
+  content: '!';
+  color: #fff;
+  position: absolute;
+  left: 4px; top: -2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+#archive-scraper-panel li.running .archive-icon {
+  background: transparent;
+  border: 2px solid #d0d7de;
+  border-top-color: #111;
+  animation: archive-spin .8s linear infinite;
+}
+@keyframes archive-spin { to { transform: rotate(360deg); } }
+
+#archive-scraper-panel .archive-detail {
+  font-size: 11px;
+  color: #888;
+  margin-left: 22px;
+  margin-top: -2px;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+#archive-scraper-panel .archive-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 11px;
+  color: #888;
+  word-break: break-all;
+}
+#archive-scraper-panel .archive-footer a { color: #0969da; text-decoration: none; }
+#archive-run-btn {
+  margin-top: 8px;
+  border: 1px solid #111;
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+#archive-run-btn:hover { background: #222; }
+#archive-run-btn[disabled] { opacity: .6; cursor: not-allowed; }
+#archive-options {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #444;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#archive-log-toggle {
+  margin-top: 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #24292f;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+#archive-log-toggle:hover { background: #eef1f4; }
+#archive-log-wrap {
+  display: none;
+  margin-top: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #0b1020;
+  color: #d1d5db;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#archive-log-wrap.open { display: block; }
+#archive-cancel-btn {
+  margin-top: 8px;
+  margin-left: 8px;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  background: #fff5f5;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: none;
+}
+#archive-cancel-btn.visible { display: inline-block; }
+#archive-cancel-btn[disabled] { opacity: .6; cursor: wait; }
