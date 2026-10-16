@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 from analyzer import analyze_building_studio
 from downloader import download_images
+from metric_units import add_metric_conversions
 from scraper import parse_article, supported_article_url
 from translator import translate_markdown, translate_text
 
@@ -419,7 +420,7 @@ def _run_job(job_id: str, url: str, html: str = "", full_translate: bool = False
             should_cancel=lambda: _is_cancel_requested(job_id),
             full_text=full_translate,
         )
-        zh_md = f"# {zh_title}\n\n[{url}]({url})\n\n{zh_body}"
+        zh_md = add_metric_conversions(f"# {zh_title}\n\n[{url}]({url})\n\n{zh_body}")
         (out_dir / "article.zh.md").write_text(zh_md, encoding="utf-8")
         _update_stage(job_id, "translate", state="done")
         _job_log(job_id, "中文翻译写入完成")

@@ -1,5 +1,12 @@
 # Development Status
 
+## 2026-10-16 | Phase: 新文章公制换算与自动补注 | Status: 完成
+
+- **目标**: 补齐近期新增中文文章的英制单位，并让后续归档自动写入公制对照。
+- **变更**: 补齐近期 4 篇 article.zh.md 中的 15 处英制长度和面积；新增 server/metric_units.py，在 server/app.py 写入中文文章前补注公制值，支持阿拉伯/中文数字、英尺半、尺寸组合及表格数值，跳过已有对照和 Markdown 链接目标。server/README.md 补充行为说明。
+- **验证**: 49 项 Python 测试与 git diff --check 通过；换算器复扫现有 182 篇中文文章，均未产生额外修改。测试使用 mock 翻译及临时目录，未调用真实模型。
+- **下一步**: 重启已有后端服务以启用自动换算；无需更新浏览器脚本。
+
 ## 2026-09-30 | Phase: 文件夹图标失败日志 | Status: 完成
 
 - **目标**: 图标脚本失败时在任务日志与 stage detail 中展示 stderr，避免截断的 CalledProcessError 命令行误导。

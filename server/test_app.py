@@ -81,6 +81,26 @@ class ServerTests(unittest.TestCase):
             meta = json.loads((output / 'meta.json').read_text())
             self.assertEqual(set(meta), {'url', 'title', 'building', 'studio', 'image_count', 'scraped_at'})
 
+    def test_worker_adds_metric_values_to_translated_article_only(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(server, 'OUTPUT_ROOT', Path(directory)), \
+                patch.object(server, '_refine_building_studio'), \
+                patch.object(server, '_apply_folder_icon'), \
+                patch.object(server, 'download_images', return_value=[Path('01.jpg'), Path('02.jpg')]), \
+                patch.object(server, 'translate_text', return_value='示例住宅'), \
+                patch.object(
+                    server, 'translate_markdown',
+                    return_value='面积874平方英尺，已有890平方英尺（83平方米）。',
+                ):
+            job_id = server._new_job()
+            server._run_job(job_id, DWELL_URL, article_data=snapshot())
+            output = Path(server._snapshot(job_id)['dir'])
+            self.assertIn(
+                '874平方英尺（81.2平方米），已有890平方英尺（83平方米）',
+                (output / 'article.zh.md').read_text(),
+            )
+            self.assertNotIn('81.2平方米', (output / 'article.md').read_text())
+
     def test_failed_download_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(server, 'OUTPUT_ROOT', Path(directory)), \
