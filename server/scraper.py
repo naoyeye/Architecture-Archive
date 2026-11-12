@@ -4,11 +4,12 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from markdownify import markdownify as md
 
 
@@ -18,10 +19,17 @@ from markdownify import markdownify as md
 REMOVE_SELECTORS = [
     ".related-in-article-wrapper",
     ".read-more",
+    ".related-story",
+    ".share-links",
+    ".post-terms",
+    ".dez-recommendations",
+    ".modal",
     "script",
     "style",
     "noscript",
 ]
+
+DEZEEN_BODY_SELECTOR = ".single-content__content, .main-article-body"
 
 
 @dataclass
@@ -142,7 +150,12 @@ def _split_building_studio(title: str, url: str, soup: BeautifulSoup) -> tuple[s
     if _looks_like_roundup(cleaned_title, url):
         return cleaned_title or "Untitled", _roundup_studio(url)
 
-    article_root = soup.select_one("article") or soup
+    article_root = deepcopy(soup.select_one(".single-content__entry")
+                            or soup.select_one("article") or soup)
+    for node in article_root.select(
+        ".related-story, .single-content__aside, .dez-recommendations"
+    ):
+        node.decompose()
 
     counter: Counter = Counter()
     for el in article_root.find_all(True):
@@ -233,9 +246,8 @@ def _safe_caption_for_filename(caption: str, max_len: int = 80) -> str:
     return s
 
 
-def _figure_image_url(fig) -> Optional[str]:
-    """Resolve a body-figure to its largest, canonicalized URL."""
-    img = fig.find("img")
+def _image_url(img) -> Optional[str]:
+    """Resolve an image to its largest, canonicalized URL."""
     if not img:
         return None
     url = _largest_from_srcset(img.get("srcset") or "") or (img.get("src") or "").strip()
@@ -244,11 +256,80 @@ def _figure_image_url(fig) -> Optional[str]:
     return _strip_size_suffix(url)
 
 
-def _extract_images(soup: BeautifulSoup) -> List[Image]:
+def _figure_image_url(fig) -> Optional[str]:
+    return _image_url(fig.find("img"))
+
+
+def _prepare_dezeen_body(soup: BeautifulSoup) -> Optional[Tag]:
+    """Copy the article body and expand sliders without their modal copies."""
+    body = soup.select_one(DEZEEN_BODY_SELECTOR)
+    if body is None:
+        if ("single-content__entry" in (soup.get("class") or [])
+                or soup.select_one(".single-hero")):
+            raise ValueError("Dezeen article body is missing or not loaded")
+        return None
+    body_copy = BeautifulSoup(str(body), "lxml").select_one(DEZEEN_BODY_SELECTOR)
+    for selector in REMOVE_SELECTORS:
+        for node in body_copy.select(selector):
+            node.decompose()
+
+    modal_images = {}
+    for slider in body_copy.select(".gallery-slider__slider"):
+        gallery = BeautifulSoup("", "lxml")
+        expanded = gallery.new_tag("div")
+        heading = slider.select_one(".gallery-slider__heading")
+        if heading:
+            expanded.append(deepcopy(heading))
+        slides = slider.select("[data-speedy-slider-item], .gallery-slider__slide")
+        if not slides:
+            raise ValueError("Dezeen gallery is empty or not loaded")
+        seen = set()
+        matched_modal_images = {}
+        for slide in slides:
+            img = slide.find("img")
+            url = _image_url(img)
+            if not url:
+                raise ValueError("Dezeen gallery image is missing or not loaded")
+            trigger = slide.select_one("[data-bs-target]")
+            target = trigger.get("data-bs-target", "") if trigger else ""
+            figure = slide.find("figure")
+            if target.startswith("#"):
+                if target not in modal_images:
+                    modal = soup.find(id=target[1:])
+                    if modal is None:
+                        raise ValueError("Dezeen gallery lightbox is not loaded")
+                    modal_images[target] = {}
+                    for modal_figure in modal.select("figure"):
+                        modal_url = _figure_image_url(modal_figure)
+                        if not modal_url:
+                            raise ValueError("Dezeen lightbox image is not loaded")
+                        modal_images[target][modal_url] = modal_figure
+                figure = modal_images[target].get(url)
+                if figure is None:
+                    raise ValueError("Dezeen gallery image does not match its lightbox")
+                matched_modal_images.setdefault(target, set()).add(url)
+            if url in seen:
+                continue
+            seen.add(url)
+            if figure is None:
+                figure = gallery.new_tag("figure")
+                figure.append(deepcopy(img))
+            expanded.append(deepcopy(figure))
+        for target, matched in matched_modal_images.items():
+            if matched != set(modal_images[target]):
+                raise ValueError("Dezeen gallery is incomplete compared with its lightbox")
+        slider.replace_with(expanded)
+    if ("single-content__content" in body.get("class", [])
+            and not body_copy.get_text(strip=True) and not body_copy.find("img")):
+        raise ValueError("Dezeen article body is empty or not loaded")
+    return body_copy
+
+
+def _extract_images(soup: BeautifulSoup, body: Optional[Tag]) -> List[Image]:
     """
     Walk the article in document order:
-      1. `article > header figure` -> largest img + figcaption (with caption)
-      2. `.main-article-body figure` -> largest img + figcaption (with caption)
+      1. `.single-hero` or legacy article header figures
+      2. Prepared body figures, including expanded gallery sliders
       3. `.extra-lightbox-images [data-lightboximage]` (no caption)
 
     Images are deduped by canonicalized URL, so an image present in both the
@@ -258,9 +339,11 @@ def _extract_images(soup: BeautifulSoup) -> List[Image]:
     images: List[Image] = []
     seen: Dict[str, Image] = {}  # canonical url -> Image
 
-    article = soup.select_one("article")
+    article = soup if soup.name == "article" else soup.select_one("article")
     if article:
-        header = article.find("header", recursive=False)
+        header = article.select_one(".single-hero")
+        if header is None:
+            header = article.find("header", recursive=False)
         if header is None:
             header = article.find("header")
         for fig in header.select("figure") if header else []:
@@ -273,14 +356,17 @@ def _extract_images(soup: BeautifulSoup) -> List[Image]:
             seen[url] = obj
             images.append(obj)
 
-    body = soup.select_one(".main-article-body")
     if body:
         for fig in body.select("figure"):
             url = _figure_image_url(fig)
-            if not url or url in seen:
+            if not url:
                 continue
             cap_el = fig.find("figcaption")
             caption = _clean_text(cap_el.get_text(" ", strip=True)) if cap_el else None
+            if url in seen:
+                if caption and not seen[url].caption:
+                    seen[url].caption = caption
+                continue
             obj = Image(url=url, caption=caption or None)
             seen[url] = obj
             images.append(obj)
@@ -356,21 +442,16 @@ def _rewrite_figures_to_placeholders(
     return blocks
 
 
-def _extract_content_md(soup: BeautifulSoup, url_to_local: Dict[str, str]) -> str:
-    body = soup.select_one(".main-article-body")
+def _extract_content_md(body: Optional[Tag], url_to_local: Dict[str, str]) -> str:
     if not body:
         return ""
 
     # Work on a copy so we don't mutate the parsed soup.
-    body_copy = BeautifulSoup(str(body), "lxml").select_one(".main-article-body")
+    body_copy = BeautifulSoup(str(body), "lxml").select_one(DEZEEN_BODY_SELECTOR)
     if body_copy is None:
         return ""
 
     blocks = _rewrite_figures_to_placeholders(body_copy, url_to_local)
-
-    for sel in REMOVE_SELECTORS:
-        for el in body_copy.select(sel):
-            el.decompose()
 
     # Drop any orphan <img> outside of figures (rare on Dezeen; avoids leaking
     # tracking pixels or share icons into the markdown).
@@ -399,14 +480,16 @@ def _extract_content_md(soup: BeautifulSoup, url_to_local: Dict[str, str]) -> st
 
 def parse_dezeen_article(url: str, html: str) -> ParsedArticle:
     soup = BeautifulSoup(html, "lxml")
+    article_root = soup.select_one("article.single-content__entry") or soup
     title = _extract_title(soup)
+    body = _prepare_dezeen_body(article_root)
     building, studio = _split_building_studio(title, url, soup)
-    images = _extract_images(soup)
+    images = _extract_images(article_root, body)
     # Build a canonical-URL -> local-filename map so we can rewrite body figures.
     url_to_local: Dict[str, str] = {}
     for img in images:
         url_to_local[_strip_size_suffix(img.url)] = img.local_filename
-    content_md = _extract_content_md(soup, url_to_local)
+    content_md = _extract_content_md(body, url_to_local)
     return ParsedArticle(
         url=url,
         title=title,

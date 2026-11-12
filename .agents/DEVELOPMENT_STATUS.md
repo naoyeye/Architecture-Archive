@@ -1,11 +1,62 @@
 # Development Status
 
+## 2026-11-07 | Phase: Dezeen 改版、归档修复与服务更新 | Status: 完成
+
+- **目标**: 兼容新版 Dezeen 正文、头图和完整图集，移除顶部广告、Recommended stories 与订阅栏，保留单独查看讨论区。
+- **证据**: Minimalist House 示例页正文为 `.single-content__content`，头图为 `.single-hero`；`.gallery-slider__slider` 有 43 张照片/图纸，关联弹窗提供大图与图注，正文和弹窗存在重复图片。
+- **变更**: `server/scraper.py` 兼容新旧正文及头图，将当前图集与显式关联弹窗逐图匹配、核对完整集合，保留图注和正文图片位置并去重下载，排除推荐、分享与弹窗控制文字；延续 Dezeen 原有尺寸后缀归一化策略。`tampermonkey/src/widget.css` 限定 Dezeen 隐藏顶部广告、Recommended stories 和 `.dcm-bar`，保留讨论区独立链接。版本更新为 2026-11-07.1，重建产物并同步 README.md、server/README.md。
+- **计划**: `.agents/plan-2026-11-07-dezeen-redesign.md`。
+- **验证**: 72 项 JS、53 项 Python 测试、构建、脚本语法与 git diff --check 通过；覆盖新旧 DOM、重复图片、图注、缺失正文/图片/弹窗、图库集合不完整、其他项目隔离、讨论区 iframe 即时/延迟加载以及构建脚本 HTML 上传至 Python 渲染。公开示例解析出 44 张唯一图片（43 张图集加头图），保留 4 张图纸的 Plan/Section 图注；抽样头图、竖图与末图 HEAD 均为 200/image/jpeg。公开页面静态副本加载实际构建脚本后，浏览器确认三处推广 display 为 none、高度为零，正文、头图和讨论区保留。
+- **初次适配边界**: 源码适配阶段只核对公开页面、静态预览及合成回归，未执行真实完整图片下载或付费翻译；后续指定归档的实际修复与服务更新见下文。
+- **后续问题**: 更新浏览器脚本但未重启后端时，常驻进程仍保留旧解析器，Minimalist House 只归档头图且中英文正文为空；旧解析得到的空正文还导致 AI 将完整标题误判为项目名称。新进程读取当前源码仍解析出 44 张图。
+- **归档修复**: 定向修复 `projects/Minimalist House in Japan by FORM-Kouichi Kimura is “reduced to the essentials” - 2026-10-29-minimalist-house-form-kouichi-kimura/`，追加下载缺少的 43 张图片，原头图与当前来源逐字节一致并保留；恢复完整英文及中文正文、图纸图注和图片位置，修正既有 meta.json 中的 building、studio 与 image_count，不扩展字段、不更名目录。
+- **修复验证**: 44 个 JPEG 全部读取尺寸成功，最小宽度 2364、最小高度 1329；中英文各有 47 个图片引用，对应 43 张唯一正文/图库图片，引用顺序完全一致、文件均存在，另有头图 01.jpg；图片合计约 28.8 MB。未调用外部付费模型，未改动其他归档。已有两个后台任务均已结束。
+- **服务更新**: 已重启现有 LaunchAgent 后端，服务健康检查正常，新的进程加载当前源码并提供 2026-11-07.1 用户脚本。
+- **下一步**: 刷新文章页；该归档已修复，无需再次抓取。
+
+## 2026-11-06 | Phase: ArchDaily 厂家字段修复与验证 | Status: 完成
+
+- **目标**: 修复 Anzio Laneway House 因 Manufacturers 字段结构不同而误报项目信息未完整加载。
+- **证据**: 公开页面将 5 家厂家放在 `.afd-specs__key` 内的 `.project_spec_manufacturers`，没有 `.afd-specs__value`；现有解析将厂家名称并入字段名并判断值缺失。
+- **变更**: `tampermonkey/src/archdaily/capture.js` 兼容明确的厂家值容器，在字段名副本中移除嵌套值，保留全部厂家名称及真实字段缺失校验；不修改页面 DOM。版本升至 2026-11-06.1，重新构建产物并同步 README.md、server/README.md。
+- **验证**: 页面实际厂家结构在修复前复现相同报错，修复后通过；68 项 JS、49 项 Python 测试、构建、脚本语法与 git diff --check 通过。新增嵌套厂家、链接厂家、DOM 不变、JS → Python Markdown 表格及缺失名称/值回归。
+- **边界**: 未执行真实完整图片下载或翻译；测试使用 mock，不写入 projects/。
+- **下一步**: 更新 Tampermonkey 至 2026-11-06.1 并刷新项目页重试；此次无需重启已支持 ArchDaily 的后端。
+
 ## 2026-10-16 | Phase: 新文章公制换算与自动补注 | Status: 完成
 
 - **目标**: 补齐近期新增中文文章的英制单位，并让后续归档自动写入公制对照。
 - **变更**: 补齐近期 4 篇 article.zh.md 中的 15 处英制长度和面积；新增 server/metric_units.py，在 server/app.py 写入中文文章前补注公制值，支持阿拉伯/中文数字、英尺半、尺寸组合及表格数值，跳过已有对照和 Markdown 链接目标。server/README.md 补充行为说明。
 - **验证**: 49 项 Python 测试与 git diff --check 通过；换算器复扫现有 182 篇中文文章，均未产生额外修改。测试使用 mock 翻译及临时目录，未调用真实模型。
 - **下一步**: 重启已有后端服务以启用自动换算；无需更新浏览器脚本。
+
+## 2026-10-16 | Phase: Dwell article 图文顺序修复 | Status: 完成
+
+- **目标**: 保留 Dwell article 正文图片的位置，修复 Before / After 标题与图片分离的问题，并定向修复 Casa Yamagoya 的现有中英文归档。
+- **证据**: Casa Yamagoya 的 21 张图片均在文末 Photos，厨房 Before 图为 images/03.jpg；story.js 删除 dwell-photo 标记，article_payload.py 将全部图片统一追加至文末。
+- **变更**: story.js 保留 figure 照片 ID 引用，common.js 仅在 article 正文清洗时保留引用属性；article_payload.py 按已验证的图片清单输出本地图片及图注，拒绝未知或畸形引用，未出现在正文的照片仍附于 Photos。无引用的旧载荷和其他站点维持原有输出。schema version 1 根字段、meta.json 不变。版本 2026-10-16.2，已构建并更新说明。
+- **归档修复**: 定向移动 projects/Casa Yamagoya - Alex Fawcett - article-casa-yamagoya-alex-fawcett-4bb7b5b6/ 的 article.md、article.zh.md 共 21 个图片/图注块，恢复厨房、入口、客厅、卧室 Before / After 及其余正文位置。逐块比对确认原有文字、图注与译文保留，图片引用各 21 个且无重复、无失效路径。
+- **验证**: 66 项 JS、45 项 Python 测试、npm run check、git diff --check 通过；覆盖图文顺序、重复引用单次下载清单、仅图片正文、空图注、非法引用/原图/未知图注拒绝及 JS → Python 渲染。实际当前 story 的关联清单及正文各 21 张，厨房 Before 指向用户指定照片 ID，正文无未支持的 img 标签。
+- **计划**: .agents/plan-2026-10-16-dwell-inline-photos.md。
+- **边界**: 未调用真实翻译，未重新下载图片，未重启用户服务；归档修复使用现有图片与译文。
+- **下一步**: 重启已有后端服务，再更新 Tampermonkey 至 2026-10-16.2 并刷新 Dwell article 页面，后续采集使用新的图文布局；本篇现有中英文已修复，无需重新抓取。
+
+## 2026-10-16 | Phase: Archello 分页相册与 ArchDaily 投稿入口修复 | Status: 完成
+
+- **目标**: 修复 Living in Alpine Village 相册分页阻塞和 House at the Top of the Hill 投稿入口误判为项目字段。
+- **证据**: Archello 主故事 38574 相册首屏 36 张、第二页 5 张，查看器确认共 41 张；ArchDaily `.submit_yourself` 投稿入口复用 `.afd-specs__item`，没有字段 key/value。
+- **变更**: 跟随当前 story/category 实际提供的分页链接，合并后核对连续位置、媒体身份与查看器总数；校验分页参数、页码、缺页、重复 ID 和数量上限，复用取消/超时。ArchDaily 仅排除有明确投稿标记且无字段标记的入口，保留真实字段缺失校验。版本升至 2026-10-16.1，重新构建并同步 README.md、server/README.md。
+- **计划**: .agents/plan-2026-10-16-gallery-and-specs-fixes.md。
+- **验证**: 64 项 JS、41 项 Python 测试、npm run check 与 git diff --check 通过。新增 41 张分页、三页与整页结尾、异常链接/缺页/重复身份、分页取消/超时/导航和投稿入口/真实缺失回归。实际相册 36+5 张、位置连续且 41 个媒体 ID 唯一；首尾查看器确认 1 of 41、41 of 41 和对应 S3 原图。ArchDaily 15 个 specs 容器保留 13 个有效字段，图库 15 张。
+- **边界**: 未执行真实完整图片下载或付费翻译，不将公开页面结构核对与合成回归视为端到端归档验收。
+- **下一步**: 更新 Tampermonkey 至 2026-10-16.1 并刷新两个项目页重试；此次无后端变更，无需重启已支持这两个站点的服务。
+
+## 2026-10-13 | Phase: 中文文章英制单位换算 | Status: 完成
+
+- **目标**: 检查 projects/ 下全部 article.zh.md，为缺少公制对照的英制长度和面积补充换算值。
+- **变更**: 检查 175 篇中文文章，为其中 17 篇缺少对照的英尺、平方英尺、英寸和英亩补充米、平方米、厘米或公顷；覆盖正文、图片说明及表格，保留已有公制对照。
+- **验证**: 全量检索英制单位并逐项核对未紧跟公制括注的用法；新增数值按标准换算系数核算。git diff --check 通过。未运行代码测试，修改仅涉及归档文本。
+- **下一步**: 无。
 
 ## 2026-09-30 | Phase: 文件夹图标失败日志 | Status: 完成
 

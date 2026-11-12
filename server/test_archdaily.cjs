@@ -10,6 +10,8 @@ const projectUrl = 'https://www.archdaily.com/1027911/sample-house';
 const ids = ['67d1c9ebc0be690189b3af4d', '67d1c5fc6fa6080189512504'];
 const large = id => `https://images.adsttc.com/media/images/${id.match(/.{4}/g).join('/')}/slideshow/house.jpg?1741802004`;
 const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/archdaily-project.html'), 'utf8');
+// Public manufacturer markup from Anzio Laneway House (1037215), without its decorative SVG.
+const manufacturerItem = '<li class="afd-specs__item"><div class="afd-specs-manufacturer-container"><span class="afd-specs__key">Manufacturers: &nbsp;<span class="project_spec_manufacturers"><span class="other-manufacturer">Articrete</span>, <span class="other-manufacturer">DML</span>, <span class="other-manufacturer">Euroline</span>, <span class="other-manufacturer">Gallery Door</span>, <span class="other-manufacturer">Schüco</span></span></span></div></li>';
 const bundle = buildSync({ entryPoints: [path.join(__dirname, '../tampermonkey/src/archdaily/capture.js')], bundle: true, format: 'iife', globalName: 'Archdaily', write: false }).outputFiles[0].text;
 
 function environment() {
@@ -60,6 +62,39 @@ test('ArchDaily prefers explicit data-largesrc and confirmed DOM captions withou
   assert.equal(env.requests.length, 0);
   assert.equal(result.photos[1].caption.status, 'empty');
   assert.equal(result.photos[0].caption.value, 'DOM caption');
+});
+
+test('ArchDaily separates nested manufacturer names from the label and preserves them in Markdown', async () => {
+  for (const markup of [manufacturerItem, manufacturerItem.replace('<span class="other-manufacturer">Schüco</span>', '<a href="/catalog/us/companies/schuco">Schüco</a>')]) {
+    const env = environment();
+    env.document.querySelector('.afd-specs').insertAdjacentHTML('beforeend', markup);
+    const before = env.document.querySelector('.afd-specs').outerHTML;
+    const result = await env.capture();
+    const row = result.sections.find(section => section.title === 'Details').rows.find(row => row.label === 'Manufacturers');
+    assert.equal(row?.value, 'Articrete, DML, Euroline, Gallery Door, Schüco');
+    assert.equal(result.studio, 'Sample Studio');
+    assert.equal(result.photos.length, 2);
+    assert.equal(env.document.querySelector('.afd-specs').outerHTML, before);
+    const rendered = spawnSync(path.join(__dirname, '.venv/bin/python'), ['-c', 'import json,sys; from scraper import parse_article; data=json.load(sys.stdin); print(parse_article(data["url"],article_data=data).content_md)'], { cwd: __dirname, input: JSON.stringify(result), encoding: 'utf8' });
+    assert.equal(rendered.status, 0, rendered.stderr);
+    assert.ok(rendered.stdout.includes('| Manufacturers | Articrete, DML, Euroline, Gallery Door, Schüco |'));
+  }
+});
+
+test('ArchDaily still rejects missing manufacturer names, labels and other real fields', async () => {
+  for (const change of [
+    page => page.querySelector('.project_spec_manufacturers').remove(),
+    page => { page.querySelector('.project_spec_manufacturers').textContent = ' '; },
+    page => { page.querySelector('.afd-specs-manufacturer-container .afd-specs__key').firstChild.textContent = ''; },
+    page => page.querySelector('.afd-specs-manufacturer-container .afd-specs__key').classList.remove('afd-specs__key'),
+    page => page.querySelector('.afd-specs__value').remove(),
+  ]) {
+    const env = environment();
+    env.document.querySelector('.afd-specs').insertAdjacentHTML('beforeend', manufacturerItem);
+    change(env.document);
+    await assert.rejects(env.capture(), /项目信息未完整加载/);
+    assert.equal(env.requests.length, 0);
+  }
 });
 
 test('ArchDaily preserves all 58 gallery entries including 17 drawings', async () => {
@@ -170,6 +205,25 @@ test('ArchDaily cancels body waits and times out stalled gallery requests', asyn
   env.context.fetch = (_, options) => new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))));
   await assert.rejects(env.capture({ requestTimeoutMs: 10 }), /超时/);
   await assert.rejects(env.capture({ overallTimeoutMs: 10 }), /超时/);
+});
+
+test('ArchDaily excludes collaboration submission rows while retaining all actual project fields', async () => {
+  const env = environment();
+  const baseline = JSON.parse(JSON.stringify(await env.capture()));
+  env.document.querySelector('.afd-specs').insertAdjacentHTML('beforeend', '<li class="afd-specs__item"><div class="submit_yourself"><a href="https://archdaily.typeform.com/to/example">Did you collaborate on this project?</a></div></li>');
+  assert.deepEqual(JSON.parse(JSON.stringify(await env.capture())), baseline);
+  for (const markup of [
+    '<span class="afd-specs__value">Actual field with no name</span>',
+    '<span class="afd-specs__key">Engineer:</span>',
+    '<span class="afd-specs__key"></span><span class="afd-specs__value">Studio</span>',
+  ]) {
+    const broken = environment();
+    broken.document.querySelector('.afd-specs').insertAdjacentHTML('beforeend', `<li class="afd-specs__item"><div class="submit_yourself">Submission</div>${markup}</li>`);
+    await assert.rejects(broken.capture(), /项目信息未完整加载/);
+  }
+  const unknown = environment();
+  unknown.document.querySelector('.afd-specs').insertAdjacentHTML('beforeend', '<li class="afd-specs__item"><a>Unknown row</a></li>');
+  await assert.rejects(unknown.capture(), /字段名称缺失/);
 });
 
 test('ArchDaily rejects HTTP failures, redirects, non-HTML and mid-capture navigation', async () => {

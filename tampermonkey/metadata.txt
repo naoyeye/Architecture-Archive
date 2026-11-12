@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Architecture Archive + Chinese Translation
 // @namespace    ArchitectureArchive
-// @version      2026-09-28.2
+// @version      2026-11-07.1
 // @description  Archive Dezeen, Dwell, Archello and ArchDaily projects with images and Chinese translation
 // @author       Jiyun
 // @match        https://www.dezeen.com/*

@@ -81,9 +81,12 @@ export function extractArchdailyProject(page, rawUrl) {
   const credits = [];
   const info = [];
   for (const item of article.querySelectorAll('.afd-specs__item')) {
-    if (item.closest(PROMOTIONAL) || (item.querySelector('.js-loading-products-widget') && !item.querySelector('.afd-specs__key, .afd-specs__value'))) continue;
-    const label = text(item.querySelector('.afd-specs__key')).replace(/\s*:\s*$/, '');
-    const value = text(item.querySelector('.afd-specs__value'));
+    if (item.closest(PROMOTIONAL) || (item.querySelector('.js-loading-products-widget, .submit_yourself') && !item.querySelector('.afd-specs__key, .afd-specs__value, .project_spec_manufacturers'))) continue;
+    const key = item.querySelector('.afd-specs__key')?.cloneNode(true);
+    // Manufacturer lists can sit inside the key rather than a separate value span.
+    key?.querySelectorAll('.afd-specs__value, .project_spec_manufacturers').forEach(node => node.remove());
+    const label = text(key).replace(/\s*:\s*$/, '');
+    const value = text(item.querySelector('.afd-specs__value, .project_spec_manufacturers'));
     if (!label || !value) throw new Error(`ArchDaily 项目信息未完整加载${label ? `：${label}` : '：字段名称缺失'}`);
     const rows = /architect|photograph|design|engineer|client/i.test(label) ? credits : /area|year|country|city|location|category/i.test(label) ? info : details;
     rows.push({ label, value });

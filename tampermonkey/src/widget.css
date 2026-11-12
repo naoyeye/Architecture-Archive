@@ -9,7 +9,10 @@ html[data-archive-site="dezeen"] .main-header {
   margin: 0 !important;
   padding: 0 !important;
 }
-html[data-archive-site="dezeen"] .right-column {
+html[data-archive-site="dezeen"] .right-column,
+html[data-archive-site="dezeen"] .top-advert.superhero,
+html[data-archive-site="dezeen"] .dez-recommendations,
+html[data-archive-site="dezeen"] .dcm-bar {
   display: none !important;
 }
 html[data-archive-site="dezeen"] .header-scroll .carousel-wrap,

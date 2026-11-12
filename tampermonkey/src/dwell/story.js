@@ -22,7 +22,7 @@ function extractDwellStory(page, url) {
     const caption = fields.match(/\bcaption="([\s\S]*?)"(?=\s+(?:layout|credit|photoUserId)="|\s*$)/i)?.[1];
     if (!id || (/\bcaption=/.test(fields) && caption === undefined)) issues.push("文章图片标记无法完整解析");
     inlinePhotos.push({ id, caption });
-    return "";
+    return id ? `<figure data-archive-photo-id="${id}"></figure>` : "";
   });
   if (/<dwell-photo\b/i.test(bodyHtml)) issues.push("文章包含未解析的图片标记");
   content.innerHTML = bodyHtml;
@@ -92,10 +92,10 @@ function extractDwellStory(page, url) {
     const value = label === "Location" ? metadata.title : metadata.value;
     if (label && ["string", "number"].includes(typeof value)) information.push({ label, value: String(value) });
   }
-  const clean = dwellContentNode(content);
+  const clean = dwellContentNode(content, true);
   let body = dwellAttribute(attributes, "body", "state.story.body");
   if (body.status !== "missing") {
-    body = dwellText(clean.textContent.trim() ? clean.innerHTML : "", "state.story.body", "html");
+    body = dwellText(clean.textContent.trim() || clean.querySelector('figure[data-archive-photo-id]') ? clean.innerHTML : "", "state.story.body", "html");
     if (attributes.lead) {
       const lead = page.createElement("p");
       lead.textContent = attributes.lead;

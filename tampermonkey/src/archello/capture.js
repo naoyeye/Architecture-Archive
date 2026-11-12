@@ -129,10 +129,53 @@ function extractArchelloProject(page, rawUrl) {
       warnings: stories.length > 1 ? [`仅归档项目头图关联的主故事 ${storyId}；其余 ${stories.length - 1} 个参与方故事不纳入正文和相册。`] : [] } };
 }
 
-function extractArchelloGallery(page, url, storyId, category) {
+function galleryPagination(grid, storyId, category, pageUrl) {
+  const path = `/story/${storyId}/attachments/${category}`;
+  const parseLink = raw => {
+    const target = new URL(raw, ORIGIN);
+    const params = [...target.searchParams];
+    const number = target.searchParams.get('page');
+    const size = target.searchParams.get('per-page');
+    if (target.origin !== ORIGIN || target.username || target.password || target.hash || target.pathname !== path
+      || params.length !== 2 || !/^[1-9]\d*$/.test(number) || !/^[1-9]\d*$/.test(size)
+      || Number(number) > 1000 || Number(size) > 1000) throw new Error('Archello 相册分页链接不匹配');
+    return { url: target.href, number: Number(number), size: Number(size) };
+  };
+  const current = new URL(pageUrl);
+  const requested = current.search ? parseLink(pageUrl) : { number: 1 };
+  const pagers = grid.querySelectorAll('.pagination');
+  if (grid.querySelector('.pager') || pagers.length > 1) throw new Error('Archello 相册分页结构无法确认');
+  if (!pagers.length) {
+    if (current.search || grid.querySelector('[rel="next"]')) throw new Error('Archello 相册分页未完整加载');
+    return { number: 1, size: null, nextPage: null };
+  }
+  const pager = pagers[0];
+  const active = pager.querySelectorAll('.active a[href]');
+  if (active.length !== 1) throw new Error('Archello 相册当前页码缺失');
+  const selected = parseLink(active[0].getAttribute('href'));
+  if (selected.number !== requested.number || (requested.size && selected.size !== requested.size)) {
+    throw new Error('Archello 相册返回了错误页码');
+  }
+  const links = [...pager.querySelectorAll('a[href]')].map(link => {
+    const target = parseLink(link.getAttribute('href'));
+    if (target.size !== selected.size || (link.hasAttribute('data-page') && link.getAttribute('data-page') !== String(target.number - 1))) {
+      throw new Error('Archello 相册分页参数冲突');
+    }
+    return target;
+  });
+  const next = grid.querySelectorAll('.pagination .next a[href], a[rel="next"][href]');
+  if (next.length > 1) throw new Error('Archello 相册下一页不明确');
+  const target = next.length ? parseLink(next[0].getAttribute('href')) : null;
+  if ((target && (target.number !== selected.number + 1 || target.size !== selected.size))
+    || (!target && links.some(link => link.number > selected.number))) throw new Error('Archello 相册下一页缺失或不连续');
+  return { ...selected, nextPage: target?.url || null };
+}
+
+function extractArchelloGallery(page, url, storyId, category, pageUrl = `${ORIGIN}/story/${storyId}/attachments/${category}`) {
   assertProjectLink(page, url, '#navbar-gallery a[href]');
   const grid = page.querySelector(`#${category}-grid`);
-  if (!grid || grid.querySelector('.pagination, .pager, [rel="next"]')) throw new Error('Archello 完整相册未加载');
+  if (!grid) throw new Error('Archello 完整相册未加载');
+  const pagination = galleryPagination(grid, storyId, category, pageUrl);
   const media = new Map();
   for (const link of grid.querySelectorAll('a[href]')) {
     const target = attachment(link.getAttribute('href'), storyId);
@@ -151,8 +194,11 @@ function extractArchelloGallery(page, url, storyId, category) {
     media.set(target.url, value);
   }
   const ordered = [...media.values()].sort((left, right) => left.position - right.position);
-  if (!ordered.length || ordered.length > 1000 || ordered.some((item, index) => item.position !== index + 1)) throw new Error('Archello 相册不完整或包含不支持的媒体');
-  return ordered;
+  const offset = (pagination.number - 1) * (pagination.size || 0);
+  if (!ordered.length || ordered.length > (pagination.size || 1000)
+    || (pagination.nextPage && ordered.length !== pagination.size)
+    || ordered.some((item, index) => item.position !== offset + index + 1)) throw new Error('Archello 相册不完整或包含不支持的媒体');
+  return { photos: ordered, nextPage: pagination.nextPage };
 }
 
 function extractArchelloPhoto(page, url, storyId, photo, count) {
@@ -236,8 +282,23 @@ async function captureArchelloArticle(url, options = {}) {
     const allMedia = new Set();
     for (const category of new Set(project.media.map(photo => photo.category))) {
       const seed = project.media.find(photo => photo.category === category);
-      const galleryPage = await load(seed.url.replace(/\/\d+$/, ''));
-      const photos = extractArchelloGallery(galleryPage, canonical, project.storyId, category);
+      let galleryUrl = seed.url.replace(/\/\d+$/, '');
+      const photos = [];
+      const mediaIds = new Set();
+      const visited = new Set();
+      while (galleryUrl) {
+        if (visited.has(galleryUrl) || visited.size >= 1000) throw new Error('Archello 相册分页循环或超过上限');
+        visited.add(galleryUrl);
+        progress(`读取 Archello ${category} 相册第 ${visited.size} 页`);
+        const gallery = extractArchelloGallery(await load(galleryUrl), canonical, project.storyId, category, galleryUrl);
+        for (const photo of gallery.photos) {
+          if (photo.position !== photos.length + 1 || mediaIds.has(photo.mediaId)) throw new Error('Archello 相册位置或照片 ID 重复、不连续');
+          mediaIds.add(photo.mediaId);
+          photos.push(photo);
+          if (photos.length > 1000) throw new Error('Archello 相册图片超过上限');
+        }
+        galleryUrl = gallery.nextPage;
+      }
       for (const photo of photos) {
         allMedia.add(photo.url);
         progress(`收集 Archello ${category} ${photo.position}/${photos.length}`);

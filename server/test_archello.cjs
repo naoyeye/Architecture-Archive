@@ -25,6 +25,96 @@ function viewer(category, position, count) {
   return `<div id="attachment-story-123-grid"><div class="photoviewer" data-key="${100 + position}"><div class="image-scale"><img src="https://archello.s3.eu-central-1.amazonaws.com${imagePath(category, position)}"></div><div class="photoviewer-content-footer">${position} of ${count}</div><div class="photoviewer-sidebar-heading"><h1><a href="${projectUrl}">Sample House</a></h1><b>Story by Sample Studio</b><p>Photo: Sample Photographer</p>${category === 'drawings' ? '<p>Floor plan</p>' : ''}<div class="catalog"><p>Unrelated catalogue</p></div></div></div></div>`;
 }
 
+function paginatedGallery(category, count, page, pageSize = 36) {
+  const { document } = parseHTML(gallery(category, count));
+  const grid = document.querySelector(`#${category}-grid`);
+  [...grid.children].forEach((item, index) => {
+    if (index < (page - 1) * pageSize || index >= page * pageSize) item.remove();
+  });
+  const pageCount = Math.ceil(count / pageSize);
+  const link = number => `/story/123/attachments/${category}?page=${number}&per-page=${pageSize}`;
+  grid.insertAdjacentHTML('beforeend', `<ul class="pagination"><li class="prev">${page > 1 ? `<a href="${link(page - 1)}">Previous</a>` : '<span>Previous</span>'}</li>${Array.from({ length: pageCount }, (_, index) => `<li class="${index + 1 === page ? 'active' : ''}"><a href="${link(index + 1)}" data-page="${index}">${index + 1}</a></li>`).join('')}<li class="next ${page === pageCount ? 'hide' : ''}">${page < pageCount ? `<a href="${link(page + 1)}">Next</a>` : '<span>Next</span>'}</li></ul>`);
+  return document.toString();
+}
+
+function paginatedEnvironment(count = 41, pageSize = 36) {
+  const env = environment(count);
+  const base = 'https://archello.com/story/123/attachments/photos-videos';
+  env.pages.set(base, paginatedGallery('photos-videos', count, 1, pageSize));
+  for (let page = 2; page <= Math.ceil(count / pageSize); page++) {
+    env.pages.set(`${base}?page=${page}&per-page=${pageSize}`, paginatedGallery('photos-videos', count, page, pageSize));
+  }
+  return { ...env, base, second: `${base}?page=2&per-page=${pageSize}` };
+}
+
+test('Archello follows gallery pagination and checks all 41 viewer originals before returning JSON', async () => {
+  const env = paginatedEnvironment();
+  const result = await capture(env);
+  assert.equal(result.expected_photo_count, 42); // 41 photos and the separate drawing gallery.
+  assert.ok(result.photos.some(photo => photo.id === imagePath('photos-videos', 41)));
+  assert.ok(env.requests.indexOf(env.second) < env.requests.indexOf(`${env.base}/1`));
+  assert.equal(env.requests.filter(url => url === env.second).length, 1);
+  assert.ok(result.photos.every(photo => photo.caption.status === 'present' && !photo.url.includes('/thumbs/')));
+});
+
+test('Archello supports more than two pages and exact page-size final pages', async () => {
+  const env = paginatedEnvironment(6, 2);
+  assert.equal((await capture(env)).expected_photo_count, 7);
+  assert.ok(env.requests.includes(`${env.base}?page=3&per-page=2`));
+});
+
+test('Archello refuses unsafe, stale, conflicting and incomplete gallery pages', async () => {
+  for (const mode of ['foreign', 'story', 'category', 'params', 'loop', 'skip', 'page-size', 'missing-next', 'stale', 'gap', 'duplicate-id', 'wrong-project', 'count', 'http']) {
+    const env = paginatedEnvironment();
+    const { document: first } = parseHTML(env.pages.get(env.base));
+    const next = first.querySelector('.next a');
+    const targets = {
+      foreign: 'https://evil.test/story/123/attachments/photos-videos?page=2&per-page=36',
+      story: '/story/999/attachments/photos-videos?page=2&per-page=36',
+      category: '/story/123/attachments/drawings?page=2&per-page=36',
+      params: '/story/123/attachments/photos-videos?page=2&per-page=36&download=1',
+      loop: '/story/123/attachments/photos-videos?page=1&per-page=36',
+      skip: '/story/123/attachments/photos-videos?page=3&per-page=36',
+      'page-size': '/story/123/attachments/photos-videos?page=2&per-page=12',
+    };
+    if (targets[mode]) next.setAttribute('href', targets[mode]);
+    if (mode === 'missing-next') next.remove();
+    env.pages.set(env.base, first.toString());
+    if (mode === 'stale') env.pages.set(env.second, env.pages.get(env.base));
+    if (mode === 'gap') env.pages.set(env.second, env.pages.get(env.second).replace('/photos-videos/37', '/photos-videos/38'));
+    if (mode === 'duplicate-id') env.pages.set(env.second, env.pages.get(env.second).replace('story-media-137-', 'story-media-101-'));
+    if (mode === 'wrong-project') env.pages.set(env.second, env.pages.get(env.second).replace(projectUrl, projectUrl + '-other'));
+    if (mode === 'count') env.pages.set(`${env.base}/1`, viewer('photos-videos', 1, 42));
+    if (mode === 'http') {
+      const fetchPage = env.context.fetch;
+      env.context.fetch = (url, options) => url === env.second ? { ok: false, status: 403 } : fetchPage(url, options);
+    }
+    await assert.rejects(capture(env), undefined, mode);
+    assert.ok(env.requests.every(url => !url.startsWith('https://evil.test') && !url.includes('/story/999/')));
+  }
+});
+
+test('Archello pagination requests preserve cancellation, timeout and navigation checks', async () => {
+  for (const mode of ['cancel', 'timeout', 'navigation']) {
+    const env = paginatedEnvironment();
+    const fetchPage = env.context.fetch;
+    env.context.setTimeout = (callback, delay) => setTimeout(callback, mode === 'timeout' && delay === 20000 ? 0 : delay);
+    env.context.fetch = (url, options) => {
+      if (url !== env.second) return fetchPage(url, options);
+      if (mode === 'navigation') {
+        env.context.location.href = projectUrl + '-other';
+        return fetchPage(url, options);
+      }
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        if (mode === 'cancel') env.context.Archello.cancelArchelloCapture();
+      });
+    };
+    await assert.rejects(capture(env), mode === 'cancel' ? /取消/ : mode === 'timeout' ? /超时/ : /切换/);
+    assert.ok(!env.requests.includes(`${env.base}/1`));
+  }
+});
+
 function environment(photoCount = 2) {
   const { document } = parseHTML(fixture);
   const requests = [];

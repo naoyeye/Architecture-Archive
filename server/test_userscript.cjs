@@ -143,6 +143,71 @@ test('Dezeen layout overrides drop paragraph and hero max-width and center page 
   assert.match(desktop, /\.page-columns \{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 });
 
+test('Dezeen hides redesign promotions while keeping the article and comments', () => {
+  const styles = fs.readFileSync(path.join(__dirname, '../tampermonkey/src/widget.css'), 'utf8');
+  const selectors = styles.match(/([^{}]+)\{\s*display:\s*none\s*!important/)[1].trim();
+  const { document } = parseHTML(fs.readFileSync(path.join(__dirname, 'fixtures/dezeen-redesign.html'), 'utf8'));
+  document.documentElement.dataset.archiveSite = 'dezeen';
+  assert.deepEqual([...document.querySelectorAll(selectors)].map(node => node.className),
+    ['top-advert superhero', 'dez-recommendations', 'dcm-bar']);
+  for (const selector of ['.single-hero', '.single-content__content', '#comments', '#disqus_thread']) {
+    assert.equal(document.querySelector(selector).matches(selectors), false);
+  }
+  document.documentElement.dataset.archiveSite = 'dwell';
+  assert.equal(document.querySelectorAll(selectors).length, 0);
+});
+
+test('built Dezeen script preserves immediate and delayed independent discussion links and HTML upload', async t => {
+  const script = fs.readFileSync(path.join(__dirname, '../tampermonkey/architecture-archive.user.js'), 'utf8');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/dezeen-redesign.html'), 'utf8');
+  for (const delayed of [false, true]) await t.test(delayed ? 'delayed Disqus iframe' : 'existing Disqus iframe', () => {
+    const { document } = parseHTML(fixture);
+    const thread = document.querySelector('#disqus_thread');
+    const iframe = document.createElement('iframe');
+    iframe.title = 'Disqus';
+    iframe.src = 'https://disqus.com/embed/comments/?thread=sample';
+    if (!delayed) thread.appendChild(iframe);
+    const requests = [];
+    let observer;
+    class Observer {
+      constructor(callback) { this.callback = callback; observer = this; }
+      observe() { this.observing = true; }
+      disconnect() { this.observing = false; }
+    }
+    vm.runInNewContext(script, {
+      document, URL, MutationObserver: Observer,
+      location: new URL('https://www.dezeen.com/2026/10/29/sample/'),
+      GM_xmlhttpRequest: request => requests.push(request),
+    });
+    if (delayed) {
+      assert.equal(observer.observing, true);
+      thread.appendChild(iframe);
+      observer.callback();
+      assert.equal(observer.observing, false);
+    }
+    const link = thread.querySelector('#archive-disqus-iframe-link');
+    assert.equal(link.textContent, '单独查看讨论区');
+    assert.equal(link.href, iframe.src);
+    assert.equal(link.target, '_blank');
+    assert.equal(link.rel, 'noopener noreferrer');
+    assert.equal(thread.querySelectorAll('#archive-disqus-iframe-link').length, 1);
+    document.querySelector('#archive-run-btn').click();
+    const payload = JSON.parse(requests.find(request => request.method === 'POST').data);
+    assert.ok(payload.html.includes('gallery-slider__slider'));
+    assert.ok(payload.html.includes('single-hero'));
+    assert.ok(payload.html.includes('drawings-modal'));
+    const { spawnSync } = require('node:child_process');
+    const parsed = spawnSync(path.join(__dirname, '.venv/bin/python'), ['-c',
+      'import json,sys; from scraper import parse_article; data=json.load(sys.stdin); article=parse_article(data["url"],data["html"]); print(json.dumps([len(article.images), article.content_md]))'],
+    { cwd: __dirname, input: JSON.stringify(payload), encoding: 'utf8' });
+    assert.equal(parsed.status, 0, parsed.stderr);
+    const [count, content] = JSON.parse(parsed.stdout);
+    assert.equal(count, 4);
+    assert.ok(content.includes('images/03 - Plan.jpg'));
+    assert.ok(!content.includes('Wrong project'));
+  });
+});
+
 test('widget buttons reset host styles before applying their own styles', () => {
   const styles = fs.readFileSync(path.join(__dirname, '../tampermonkey/src/widget.css'), 'utf8');
   const reset = styles.match(/#archive-scraper :where\(button\) \{([^}]+)\}/)[1];
@@ -397,6 +462,38 @@ test('article captures story body, inline captions, originals and credits withou
   assert.equal(output.status, 0, output.stderr);
   assert.match(output.stdout, /A \*\*wooden\*\* room/);
   assert.match(output.stdout, /images\/02.jpg/);
+  assert.match(output.stdout, /First paragraph\.\s+!\[\]\(images\/02.jpg\)\s+A \*\*wooden\*\* room\.\s+Last paragraph\.\s+!\[\]\(images\/01.jpg\)/);
+  assert.doesNotMatch(output.stdout, /## Photos|data-archive-photo-id|ARCHIVEPHOTOREFERENCE/);
+});
+
+test('article keeps Before and After photos in position, with repeated references and gallery-only photos', async () => {
+  const { document, context } = storyEnvironment();
+  changeState(document, state => {
+    state.articles.items['20'].attributes.body = '<h4>Before: Kitchen and Dining Room</h4><dwell-photo photoId="201" caption="Before kitchen"/><p>Renovation text.</p><h4>After: Kitchen and Dining Room</h4><dwell-photo photoId="201" caption="Before kitchen"/><p>End.</p>';
+  });
+  const result = JSON.parse(JSON.stringify(await vm.runInContext(`captureDwellArticle('${storyUrl}')`, context)));
+  assert.equal(result.photos.length, 2);
+  const body = parseHTML(`<main>${result.body.value}</main>`).document.querySelector('main');
+  assert.equal(body.querySelectorAll('figure[data-archive-photo-id="201"]').length, 2);
+  const { spawnSync } = require('node:child_process');
+  const output = spawnSync(path.join(__dirname, '.venv/bin/python'), ['-c',
+    'import json,sys; from scraper import parse_article; data=json.load(sys.stdin); print(parse_article(data["url"], article_data=data).content_md)'],
+    { cwd: __dirname, input: JSON.stringify(result), encoding: 'utf8' });
+  assert.equal(output.status, 0, output.stderr);
+  assert.match(output.stdout, /#### Before: Kitchen and Dining Room\s+!\[\]\(images\/02.jpg\)\s+Before kitchen\s+Renovation text\.\s+#### After: Kitchen and Dining Room\s+!\[\]\(images\/02.jpg\)\s+Before kitchen\s+End\./);
+  assert.match(output.stdout, /## Photos\s+!\[\]\(images\/01.jpg\)/);
+  assert.equal(output.stdout.match(/images\/02.jpg/g).length, 2);
+});
+
+test('article photo-only body stays present and cannot lose its inline reference in sanitization', () => {
+  const { document, context } = storyEnvironment();
+  changeState(document, state => {
+    delete state.articles.items['20'].attributes.lead;
+    state.articles.items['20'].attributes.body = '<dwell-photo photoId="201" caption="Add a caption"/>';
+  });
+  const result = vm.runInContext(`validateDwellCapture(extractDwellArticle(document, '${storyUrl}'))`, context);
+  assert.equal(result.body.status, 'present');
+  assert.equal(result.body.value, '<figure data-archive-photo-id="201"></figure>');
 });
 
 test('article ignores hashed classes and other stories and never uploads state secrets', () => {

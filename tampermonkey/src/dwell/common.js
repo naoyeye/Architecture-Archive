@@ -34,13 +34,15 @@ function preferredDwellText(...values) {
     || values.find(value => value.status === 'empty') || values[0];
 }
 
-function dwellContentNode(node) {
+function dwellContentNode(node, preservePhotoReferences = false) {
   if (!node) return null;
   const clone = node.cloneNode(true);
   for (const child of clone.querySelectorAll('script, style, button, select, input, textarea, svg, iframe, img, nav, footer')) child.remove();
   for (const child of [clone, ...clone.querySelectorAll('*')]) {
     for (const attribute of [...child.attributes]) {
-      if (!['href', 'title'].includes(attribute.name)) child.removeAttribute(attribute.name);
+      const photoReference = preservePhotoReferences && child.tagName === 'FIGURE'
+        && attribute.name === 'data-archive-photo-id' && /^\d+$/.test(attribute.value);
+      if (!['href', 'title'].includes(attribute.name) && !photoReference) child.removeAttribute(attribute.name);
     }
     if (child.hasAttribute('href')) {
       try {

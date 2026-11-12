@@ -2,9 +2,20 @@
 
 配合 Tampermonkey 脚本 `tampermonkey/architecture-archive.user.js` 使用：浏览器向本服务 POST 当前页面 URL，Dezeen 传 HTML，Dwell home / article、Archello project 和 ArchDaily 项目传结构化文章 JSON，本服务负责解析、下载站点大图、保存中英 Markdown 到仓库根目录下的 `projects/<建筑名> - <工作室> - <url路径>/`（与 `server/`、`tampermonkey/` 同级）。
 
+### Dezeen 改版支持（2026-11-07.1）
+
+- 兼容新版 `.single-content__content` 正文、`.single-hero` 头图与 `.gallery-slider__slider` 图片清单，继续支持旧版 `.main-article-body` 和 lightbox 图片。
+- 按当前图集显式关联的弹窗匹配图片大图与图注；头图、正文、图集按规范化 URL 去重下载，保留正文中的图片位置和图纸说明。正文推荐文章、分享按钮与弹窗控制文字不写入 Markdown；未加载的正文、图集或不匹配的弹窗会报错。
+- 浏览器隐藏顶部 `.top-advert.superhero`、Recommended stories 和 `.dcm-bar`，继续提供「单独查看讨论区」，也支持讨论区 iframe 延迟加载。
+- 需按下文运维方式重启已有后端服务，再从 `/script.user.js` 更新 Tampermonkey 脚本并刷新文章页。
+
 ### ArchDaily 项目支持（2026-09-28.1）
 
 2026-09-28.2 修复广告占位误判：忽略 js-publift 广告、related-products 和 Products 推荐骨架屏，不等待其加载，也不把它们当项目字段或正文；真实正文加载标记与真实项目字段缺失仍会阻止抓取。此修复仅更新浏览器脚本，无需重启已支持 ArchDaily 的后端。
+
+2026-10-16.1 修复投稿入口误判：有 `.submit_yourself` 标记且没有字段 key/value 标记的合作投稿入口不作为项目字段。真实字段缺少名称或值仍报错。只需更新 Tampermonkey 脚本并刷新项目页，无需重启已支持该站点的后端。
+
+2026-11-06.1 兼容 Manufacturers 将 `.project_spec_manufacturers` 嵌在字段名称内的结构，分离字段名称与厂家列表，完整写入 Details 表格；真正缺少名称或值仍报错。只需更新 Tampermonkey 脚本并刷新项目页，无需重启后端。
 
 - 支持 `https://www.archdaily.com/<数字ID>/<slug>` 项目主页，不支持列表或独立图片页。以 canonical、`#single-content` 的文章 URL、图库链接和查看器 `data-path` 共同校验归属。
 - 正文有 `#content-placeholder` / `picture.loader` 时等待网站自行加载，不归档只有首段的残缺正文，不自行访问隐藏正文接口。等待和图库请求都可取消；单请求上限 20 秒，总时限 60 秒，导航变化会中止。
@@ -291,7 +302,8 @@ Dwell 示例页的公开 HTML 用于本地解析验证，不代表已验证你�
 - 从旧版本迁移需先构建，再重启已有本地服务，使其读取新产物路径并接受 article URL，然后更新 Tampermonkey 脚本。
 - article 根据 URL slug 匹配 `stories` 记录（位于 `INITIAL_STATE.articles`），收集 lead、body、封面、正文图片和文章关联照片。不会套用 home 的 View More 或照片补取流程，也不收集推荐文章图片。
 - 正文中的 `dwell-photo` 可能包含未转义的 HTML 引号；先解析图片标记，再清洗描述中的 HTML。编辑器的 `Add a caption` 占位符及明确空值不写成虚构描述；缺失数据仍阻止抓取。
-- 沿用 schema version 1 和现有 Markdown 布局：正文单独放 Description，图片按封面、正文出现顺序、剩余关联照片去重后放 Photos，并附描述；不是将图片穿插回原始正文段落。
+- 2026-10-16.2 起，article 正文中的图片与图注保留在原文位置，支持 Before / After 对照区块。HTML body 使用 `<figure data-archive-photo-id="照片ID"></figure>` 引用已验证的 photos 清单，后端仅在 Dwell article 正文接受该标记，生成对应的本地 images/ 链接和图注；未知或畸形引用会报错，任意 HTML img 不会作为可信图片。重复引用只下载一次；未在正文出现的封面或关联照片仍放 Photos，已在正文出现的图片不重复附在文末。
+- 沿用 schema version 1 的根字段；无正文图片引用的旧载荷、Dwell home、Archello 与 ArchDaily 保持 Description / Photos 分组。升级此版本必须重启已有后端服务以读取正文引用渲染逻辑，再更新 Tampermonkey 并刷新页面；不要启动第二个服务。
 - 文章署名和正文 Project Credits 转为 Credits 表格，已识别的位置等字段转为 Project information 表格；不扩展 meta.json。
 - 测试覆盖 article URL、原图、带 HTML 的图注、描述缺失、项目隔离、构建安装头及启动、浏览器 JSON → Python Markdown。公开 HTML 解析验证不等于付费登录态端到端验证。
 
@@ -299,7 +311,7 @@ Dwell 示例页的公开 HTML 用于本地解析验证，不代表已验证你�
 ### Archello project 支持（2026-09-16.3）
 
 - 支持 `https://archello.com/project/<slug>`。浏览器读取当前项目的 canonical 和 story 关系，抓取 `.mce-content-body` 正文；剔除正文内广告、产品推广模块和推荐项目。选择器来自可读的语义 class / ID，不使用编译哈希 class。
-- 完整相册通过项目实际提供的 story 链接读取，照片和图纸分别校验连续位置；每张查看器必须同时匹配项目链接、story ID、媒体 ID、当前位置和总数量。主页的 `+N` 预览不是完整相册，缩略图不作为原图。
+- 完整相册通过项目实际提供的 story 链接读取；2026-10-16.1 起跟随相册实际提供的下一页链接，限定同源、同 story/category、连续页码与一致分页大小，拒绝循环、缺页、重复媒体和超过 1000 张的清单。照片和图纸分别校验连续位置，全部清单完成后每张查看器必须同时匹配项目链接、story ID、媒体 ID、当前位置和总数量。主页的 `+N` 预览不是完整相册，缩略图不作为原图。此次修复只需更新 Tampermonkey 并刷新页面，无需重启已支持 Archello 的后端。
 - 原图仅接受查看器明确提供的 `https://archello.s3.eu-central-1.amazonaws.com/images/YYYY/MM/DD/<filename>.<jpg|jpeg|png|webp|avif>`，并验证与相册图片路径一致。不猜测 S3 地址，不调用登录下载或 CAPTCHA 接口；遇到 403、跳转或验证页就失败，不能绕过访问限制。
 - 描述来自查看器的描述/摄影署名段落，保留正文中特有的图注。查看器描述容器已确认且无段落才表示 empty；无法定位当前项目、图片、正文或描述容器时失败。Description 与 Photos 分组输出，不恢复原始图文穿插。
 - Project data、完整 Project credits 和完整 Product spec sheet 的材料/品牌/产品写入 Project information、Credits、Details 表格。材料表中跨项目聚合的 Specified By 不作为本项目署名。署名有 View All 时按页面给出的同项目链接展开；展开后仍截断则失败。

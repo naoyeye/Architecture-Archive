@@ -64,7 +64,7 @@ def _plain_markdown(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]<>#|])", r"\\\1", text)
 
 
-def _render_text(value, field: str) -> str:
+def _render_text(value, field: str, *, photo_blocks=None, used_photos=None) -> str:
     if not isinstance(value, dict):
         raise ValueError(f"{field} must include status, format, value and source")
     status = value.get("status")
@@ -90,7 +90,30 @@ def _render_text(value, field: str) -> str:
         for link in soup.find_all("a", href=True):
             if urlparse(link["href"]).scheme not in {"https", "http"}:
                 del link["href"]
+        # Keep references separate from untrusted HTML images. Only validated
+        # gallery records can supply a local filename and rendered caption.
+        prefix = "ARCHIVEPHOTOREFERENCE"
+        while prefix in text or any(prefix in block for block in (photo_blocks or {}).values()):
+            prefix += "X"
+        replacements = {}
+        for node in soup.select("[data-archive-photo-id]"):
+            photo_id = node.get("data-archive-photo-id")
+            if (photo_blocks is None or node.name != "figure"
+                    or set(node.attrs) != {"data-archive-photo-id"}
+                    or node.get_text(strip=True) or node.find(True)
+                    or photo_id not in photo_blocks):
+                raise ValueError("Invalid or unknown inline photo reference")
+            token = f"{prefix}{len(replacements)}END"
+            replacements[token] = photo_blocks[photo_id]
+            used_photos.add(photo_id)
+            placeholder = soup.new_tag("p")
+            placeholder.string = token
+            node.replace_with(placeholder)
         rendered = markdownify(str(soup), heading_style="ATX").strip()
+        for token, block in replacements.items():
+            rendered = rendered.replace(token, f"\n\n{block.rstrip()}\n\n")
+        if replacements:
+            rendered = re.sub(r"\n{3,}", "\n\n", rendered).strip()
     else:
         raise ValueError(f"{field}.format is invalid")
     if status == "present" and not rendered:
@@ -119,7 +142,6 @@ def parse_article_payload(url: str, data) -> ParsedArticle:
     title = _string(data["title"], "title", False)
     building = _string(data["building"], "building", False)
     studio = _string(data["studio"], "studio")
-    body = _render_text(data["body"], "body")
     warnings = data["warnings"]
     if not isinstance(warnings, list) or len(warnings) > 30:
         raise ValueError("warnings must be a list with at most 30 entries")
@@ -128,7 +150,7 @@ def parse_article_payload(url: str, data) -> ParsedArticle:
     sections = data["sections"]
     if not isinstance(sections, list) or len(sections) > len(SECTION_TITLES):
         raise ValueError("sections must be a list of project tables")
-    content = [f"## Description\n\n{body}"] if body else []
+    content = []
     seen_sections = set()
     for section in sections:
         if not isinstance(section, dict):
@@ -160,7 +182,7 @@ def parse_article_payload(url: str, data) -> ParsedArticle:
     seen_ids = set()
     seen_urls = set()
     images = []
-    blocks = []
+    blocks = {}
     width = max(2, len(str(count)))
     for index, photo in enumerate(photos, 1):
         if not isinstance(photo, dict):
@@ -186,8 +208,18 @@ def parse_article_payload(url: str, data) -> ParsedArticle:
         image = Image(original, caption or None)
         image.local_filename = f"{index:0{width}d}{_ext_from_url(original)}"
         images.append(image)
-        blocks.append(f"![](images/{image.local_filename})\n\n{caption}")
-    content.append("## Photos\n\n" + "\n\n".join(blocks))
+        blocks[photo_id] = f"![](images/{image.local_filename})\n\n{caption}"
+    used_photos = set()
+    inline_photos = source == "dwell" and parsed.path.startswith("/article/")
+    body = _render_text(
+        data["body"], "body", photo_blocks=blocks if inline_photos else None,
+        used_photos=used_photos,
+    )
+    if body:
+        content.insert(0, f"## Description\n\n{body}")
+    remaining = [block for photo_id, block in blocks.items() if photo_id not in used_photos]
+    if remaining:
+        content.append("## Photos\n\n" + "\n\n".join(remaining))
     return ParsedArticle(
         canonical, title, building, studio, images,
         "\n\n".join(content).rstrip() + "\n",

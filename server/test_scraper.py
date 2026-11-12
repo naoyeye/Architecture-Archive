@@ -1,7 +1,9 @@
 import copy
 import unittest
+from pathlib import Path
 from urllib.parse import quote
 
+from bs4 import BeautifulSoup
 from article_payload import original_image_url
 from scraper import parse_article, supported_article_url
 
@@ -59,6 +61,65 @@ class ArticleParsingTests(unittest.TestCase):
         article = parse_article(DWELL_URL, article_data=data)
         self.assertNotIn('## Description', article.content_md)
         self.assertEqual(len(article.images), 2)
+
+    def test_inline_article_photos_use_validated_local_files_and_captions(self):
+        data = snapshot()
+        data['url'] = DWELL_URL.replace('/home/', '/article/')
+        data['body'] = text_field(
+            '<h4>Before</h4><figure data-archive-photo-id="201"></figure>'
+            '<p>Between.</p><h4>After</h4>'
+            '<figure data-archive-photo-id="200"></figure>'
+            '<p>ARCHIVEPHOTOREFERENCE0END</p>',
+            'state.story.body', 'html',
+        )
+        article = parse_article(data['url'], article_data=data)
+        self.assertRegex(article.content_md, r'Before\s+!\[\]\(images/02.jpg\)\s+Between')
+        self.assertRegex(article.content_md, r'After\s+!\[\]\(images/01.jpg\)\s+Ocean \*view\*')
+        self.assertIn('ARCHIVEPHOTOREFERENCE0END', article.content_md)
+        self.assertNotIn('## Photos', article.content_md)
+        self.assertNotIn('data-archive-photo-id', article.content_md)
+        self.assertEqual(len(article.images), 2)
+
+    def test_invalid_inline_references_are_rejected(self):
+        for markup in [
+            '<figure data-archive-photo-id="999"></figure>',
+            '<figure data-archive-photo-id="200" title="extra"></figure>',
+            '<figure data-archive-photo-id="200">Unknown content</figure>',
+            '<figure data-archive-photo-id="200"><span></span></figure>',
+            '<div data-archive-photo-id="200"></div>',
+            '<figure data-archive-photo-id=""></figure>',
+        ]:
+            data = snapshot()
+            data['url'] = DWELL_URL.replace('/home/', '/article/')
+            data['body'] = text_field(markup, 'state.story.body', 'html')
+            with self.subTest(markup=markup), self.assertRaisesRegex(ValueError, 'inline photo'):
+                parse_article(data['url'], article_data=data)
+        data = snapshot()
+        data['body'] = text_field('<figure data-archive-photo-id="200"></figure>', format='html')
+        with self.assertRaisesRegex(ValueError, 'inline photo'):
+            parse_article(data['url'], article_data=data)
+
+    def test_photo_only_article_retains_empty_caption_and_gallery_only_cover(self):
+        data = snapshot()
+        data['url'] = DWELL_URL.replace('/home/', '/article/')
+        data['body'] = text_field('<figure data-archive-photo-id="201"></figure>', format='html')
+        article = parse_article(data['url'], article_data=data)
+        self.assertTrue(article.content_md.startswith('## Description\n\n![](images/02.jpg)\n'))
+        self.assertEqual(article.content_md.count('images/02.jpg'), 1)
+        self.assertIn('## Photos\n\n![](images/01.jpg)', article.content_md)
+        self.assertIsNone(article.images[1].caption)
+
+    def test_inline_reference_cannot_supply_unconfirmed_originals_or_captions(self):
+        for field in ['url', 'caption']:
+            data = snapshot()
+            data['url'] = DWELL_URL.replace('/home/', '/article/')
+            data['body'] = text_field('<figure data-archive-photo-id="200"></figure>', format='html')
+            if field == 'url':
+                data['photos'][0]['url'] = ORIGINAL.replace('original', 'small')
+            else:
+                data['photos'][0]['caption']['status'] = 'missing'
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                parse_article(data['url'], article_data=data)
 
     def test_missing_body_or_caption_is_not_accepted_as_empty(self):
         for field in ['body', 'caption']:
@@ -146,6 +207,82 @@ class ArticleParsingTests(unittest.TestCase):
         self.assertEqual(len(article.images), 2)
         self.assertEqual(article.images[0].url, 'https://static.dezeen.com/house.jpg')
         self.assertIn('A house.', article.content_md)
+
+    def test_dezeen_redesign_preserves_gallery_captions_and_body_order(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-redesign.html').read_text()
+        article = parse_article('https://www.dezeen.com/2026/10/29/sample/', html)
+        self.assertEqual(article.building, 'Sample House')
+        self.assertEqual(article.studio, 'Example Studio')
+        self.assertEqual([image.url.rsplit('/', 1)[-1] for image in article.images],
+                         ['hero.jpg', 'interior.jpg', 'plan.jpg', 'section.jpg'])
+        self.assertEqual([image.caption for image in article.images],
+                         [None, 'Living room', 'Plan', 'Section'])
+        content = article.content_md
+        ordered = ['A house above the lake.', 'images/02 - Living room.jpg',
+                   '### Drawings', 'images/03 - Plan.jpg', 'images/04 - Section.jpg',
+                   'The tall void connects both floors.', 'Photography by Example Photographer.']
+        self.assertEqual(sorted(content.index(part) for part in ordered),
+                         [content.index(part) for part in ordered])
+        self.assertEqual(content.count('images/03 - Plan.jpg'), 1)
+        self.assertEqual(content.count('images/02 - Living room.jpg'), 2)
+        for unwanted in ['Wrong project', 'sidebar.jpg', 'recommended.jpg',
+                         'Previous', 'Next', 'Close', 'Facebook', 'Read more']:
+            self.assertNotIn(unwanted, content)
+
+    def test_dezeen_redesign_rejects_incomplete_body_and_gallery(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-redesign.html').read_text()
+        for mode in ['missing-body', 'empty-body', 'empty-gallery', 'partial-gallery', 'missing-image',
+                     'missing-url', 'missing-modal', 'wrong-modal-image']:
+            with self.subTest(mode=mode):
+                soup = BeautifulSoup(html, 'lxml')
+                if mode == 'missing-body':
+                    soup.select_one('.single-content__content').decompose()
+                elif mode == 'empty-body':
+                    soup.select_one('.single-content__content').clear()
+                elif mode == 'empty-gallery':
+                    soup.select_one('.gallery-slider__slider ul').clear()
+                elif mode == 'partial-gallery':
+                    soup.select_one('.gallery-slider__slide').decompose()
+                elif mode == 'missing-image':
+                    soup.select_one('.gallery-slider__slide img').decompose()
+                elif mode == 'missing-url':
+                    soup.select_one('.gallery-slider__slide img').attrs.clear()
+                elif mode == 'missing-modal':
+                    soup.select_one('#drawings-modal').decompose()
+                else:
+                    soup.select_one('#drawings-modal figure').decompose()
+                with self.assertRaisesRegex(ValueError, 'Dezeen'):
+                    parse_article('https://www.dezeen.com/2026/10/29/sample/', str(soup))
+
+    def test_dezeen_legacy_lightbox_deduplicates_and_preserves_captions(self):
+        html = '''<article><h1>Sample House by Example Studio</h1>
+        <header><figure><img src="https://static.dezeen.com/house-800x600.jpg"></figure></header>
+        <div class="main-article-body"><p>A house.</p><figure><img src="https://static.dezeen.com/house.jpg"><figcaption>Outside</figcaption></figure>
+        <div class="related-in-article-wrapper"><figure><img src="https://static.dezeen.com/other.jpg"></figure><p>Read a different story</p></div></div></article>
+        <div class="extra-lightbox-images"><a data-lightboximage="https://static.dezeen.com/house.jpg"></a><a data-lightboximage="https://static.dezeen.com/plan.jpg"></a></div>'''
+        article = parse_article('https://www.dezeen.com/2026/09/10/sample/', html)
+        self.assertEqual(len(article.images), 2)
+        self.assertEqual(article.images[0].caption, 'Outside')
+        self.assertNotIn('different story', article.content_md)
+        self.assertIn('images/01 - Outside.jpg', article.content_md)
+
+    def test_dezeen_gallery_clones_and_unrelated_projects_cannot_change_capture(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-redesign.html').read_text()
+        soup = BeautifulSoup(html, 'lxml')
+        first_slide = soup.select_one('.gallery-slider__slide')
+        first_slide.parent.append(copy.deepcopy(first_slide))
+        sidebar = soup.select_one('.single-content__aside')
+        for _ in range(12):
+            img = soup.new_tag('img', alt='Wrong house by Wrong studio')
+            sidebar.append(img)
+        # Recommendations can occur before the main article in document order.
+        soup.body.insert(0, soup.select_one('.dez-recommendations').extract())
+        soup.body.append(BeautifulSoup('<div class="gallery-slider__slider"><img src="https://static-2026.dezeen.com/other-gallery.jpg"></div>', 'lxml'))
+        article = parse_article('https://www.dezeen.com/2026/10/29/sample/', str(soup))
+        self.assertEqual(article.building, 'Sample House')
+        self.assertEqual(article.studio, 'Example Studio')
+        self.assertEqual(len(article.images), 4)
+        self.assertEqual(article.content_md.count('images/03 - Plan.jpg'), 1)
 
 
 if __name__ == '__main__':

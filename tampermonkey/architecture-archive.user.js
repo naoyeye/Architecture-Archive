@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Architecture Archive + Chinese Translation
 // @namespace    ArchitectureArchive
-// @version      2026-09-28.2
+// @version      2026-11-07.1
 // @description  Archive Dezeen, Dwell, Archello and ArchDaily projects with images and Chinese translation
 // @author       Jiyun
 // @match        https://www.dezeen.com/*
@@ -37,7 +37,10 @@ html[data-archive-site="dezeen"] .main-header {
   margin: 0 !important;
   padding: 0 !important;
 }
-html[data-archive-site="dezeen"] .right-column {
+html[data-archive-site="dezeen"] .right-column,
+html[data-archive-site="dezeen"] .top-advert.superhero,
+html[data-archive-site="dezeen"] .dez-recommendations,
+html[data-archive-site="dezeen"] .dcm-bar {
   display: none !important;
 }
 html[data-archive-site="dezeen"] .header-scroll .carousel-wrap,
@@ -352,9 +355,11 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
     const credits = [];
     const info = [];
     for (const item of article.querySelectorAll(".afd-specs__item")) {
-      if (item.closest(PROMOTIONAL) || item.querySelector(".js-loading-products-widget") && !item.querySelector(".afd-specs__key, .afd-specs__value")) continue;
-      const label = text(item.querySelector(".afd-specs__key")).replace(/\s*:\s*$/, "");
-      const value = text(item.querySelector(".afd-specs__value"));
+      if (item.closest(PROMOTIONAL) || item.querySelector(".js-loading-products-widget, .submit_yourself") && !item.querySelector(".afd-specs__key, .afd-specs__value, .project_spec_manufacturers")) continue;
+      const key = item.querySelector(".afd-specs__key")?.cloneNode(true);
+      key?.querySelectorAll(".afd-specs__value, .project_spec_manufacturers").forEach((node) => node.remove());
+      const label = text(key).replace(/\s*:\s*$/, "");
+      const value = text(item.querySelector(".afd-specs__value, .project_spec_manufacturers"));
       if (!label || !value) throw new Error(`ArchDaily \u9879\u76EE\u4FE1\u606F\u672A\u5B8C\u6574\u52A0\u8F7D${label ? `\uFF1A${label}` : "\uFF1A\u5B57\u6BB5\u540D\u79F0\u7F3A\u5931"}`);
       const rows2 = /architect|photograph|design|engineer|client/i.test(label) ? credits : /area|year|country|city|location|category/i.test(label) ? info : details;
       rows2.push({ label, value });
@@ -616,10 +621,49 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
       }
     };
   }
-  function extractArchelloGallery(page, url, storyId, category) {
+  function galleryPagination(grid, storyId, category, pageUrl) {
+    const path = `/story/${storyId}/attachments/${category}`;
+    const parseLink = (raw) => {
+      const target2 = new URL(raw, ORIGIN2);
+      const params = [...target2.searchParams];
+      const number = target2.searchParams.get("page");
+      const size = target2.searchParams.get("per-page");
+      if (target2.origin !== ORIGIN2 || target2.username || target2.password || target2.hash || target2.pathname !== path || params.length !== 2 || !/^[1-9]\d*$/.test(number) || !/^[1-9]\d*$/.test(size) || Number(number) > 1e3 || Number(size) > 1e3) throw new Error("Archello \u76F8\u518C\u5206\u9875\u94FE\u63A5\u4E0D\u5339\u914D");
+      return { url: target2.href, number: Number(number), size: Number(size) };
+    };
+    const current = new URL(pageUrl);
+    const requested = current.search ? parseLink(pageUrl) : { number: 1 };
+    const pagers = grid.querySelectorAll(".pagination");
+    if (grid.querySelector(".pager") || pagers.length > 1) throw new Error("Archello \u76F8\u518C\u5206\u9875\u7ED3\u6784\u65E0\u6CD5\u786E\u8BA4");
+    if (!pagers.length) {
+      if (current.search || grid.querySelector('[rel="next"]')) throw new Error("Archello \u76F8\u518C\u5206\u9875\u672A\u5B8C\u6574\u52A0\u8F7D");
+      return { number: 1, size: null, nextPage: null };
+    }
+    const pager = pagers[0];
+    const active = pager.querySelectorAll(".active a[href]");
+    if (active.length !== 1) throw new Error("Archello \u76F8\u518C\u5F53\u524D\u9875\u7801\u7F3A\u5931");
+    const selected = parseLink(active[0].getAttribute("href"));
+    if (selected.number !== requested.number || requested.size && selected.size !== requested.size) {
+      throw new Error("Archello \u76F8\u518C\u8FD4\u56DE\u4E86\u9519\u8BEF\u9875\u7801");
+    }
+    const links = [...pager.querySelectorAll("a[href]")].map((link) => {
+      const target2 = parseLink(link.getAttribute("href"));
+      if (target2.size !== selected.size || link.hasAttribute("data-page") && link.getAttribute("data-page") !== String(target2.number - 1)) {
+        throw new Error("Archello \u76F8\u518C\u5206\u9875\u53C2\u6570\u51B2\u7A81");
+      }
+      return target2;
+    });
+    const next = grid.querySelectorAll('.pagination .next a[href], a[rel="next"][href]');
+    if (next.length > 1) throw new Error("Archello \u76F8\u518C\u4E0B\u4E00\u9875\u4E0D\u660E\u786E");
+    const target = next.length ? parseLink(next[0].getAttribute("href")) : null;
+    if (target && (target.number !== selected.number + 1 || target.size !== selected.size) || !target && links.some((link) => link.number > selected.number)) throw new Error("Archello \u76F8\u518C\u4E0B\u4E00\u9875\u7F3A\u5931\u6216\u4E0D\u8FDE\u7EED");
+    return { ...selected, nextPage: target?.url || null };
+  }
+  function extractArchelloGallery(page, url, storyId, category, pageUrl = `${ORIGIN2}/story/${storyId}/attachments/${category}`) {
     assertProjectLink(page, url, "#navbar-gallery a[href]");
     const grid = page.querySelector(`#${category}-grid`);
-    if (!grid || grid.querySelector('.pagination, .pager, [rel="next"]')) throw new Error("Archello \u5B8C\u6574\u76F8\u518C\u672A\u52A0\u8F7D");
+    if (!grid) throw new Error("Archello \u5B8C\u6574\u76F8\u518C\u672A\u52A0\u8F7D");
+    const pagination = galleryPagination(grid, storyId, category, pageUrl);
     const media = /* @__PURE__ */ new Map();
     for (const link of grid.querySelectorAll("a[href]")) {
       const target = attachment(link.getAttribute("href"), storyId);
@@ -638,8 +682,9 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
       media.set(target.url, value);
     }
     const ordered = [...media.values()].sort((left, right) => left.position - right.position);
-    if (!ordered.length || ordered.length > 1e3 || ordered.some((item, index) => item.position !== index + 1)) throw new Error("Archello \u76F8\u518C\u4E0D\u5B8C\u6574\u6216\u5305\u542B\u4E0D\u652F\u6301\u7684\u5A92\u4F53");
-    return ordered;
+    const offset = (pagination.number - 1) * (pagination.size || 0);
+    if (!ordered.length || ordered.length > (pagination.size || 1e3) || pagination.nextPage && ordered.length !== pagination.size || ordered.some((item, index) => item.position !== offset + index + 1)) throw new Error("Archello \u76F8\u518C\u4E0D\u5B8C\u6574\u6216\u5305\u542B\u4E0D\u652F\u6301\u7684\u5A92\u4F53");
+    return { photos: ordered, nextPage: pagination.nextPage };
   }
   function extractArchelloPhoto(page, url, storyId, photo, count) {
     const viewer = page.querySelector(`[id="attachment-story-${storyId}-grid"] .photoviewer`);
@@ -724,8 +769,23 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
       const allMedia = /* @__PURE__ */ new Set();
       for (const category of new Set(project.media.map((photo) => photo.category))) {
         const seed = project.media.find((photo) => photo.category === category);
-        const galleryPage = await load(seed.url.replace(/\/\d+$/, ""));
-        const photos = extractArchelloGallery(galleryPage, canonical, project.storyId, category);
+        let galleryUrl = seed.url.replace(/\/\d+$/, "");
+        const photos = [];
+        const mediaIds = /* @__PURE__ */ new Set();
+        const visited = /* @__PURE__ */ new Set();
+        while (galleryUrl) {
+          if (visited.has(galleryUrl) || visited.size >= 1e3) throw new Error("Archello \u76F8\u518C\u5206\u9875\u5FAA\u73AF\u6216\u8D85\u8FC7\u4E0A\u9650");
+          visited.add(galleryUrl);
+          progress(`\u8BFB\u53D6 Archello ${category} \u76F8\u518C\u7B2C ${visited.size} \u9875`);
+          const gallery = extractArchelloGallery(await load(galleryUrl), canonical, project.storyId, category, galleryUrl);
+          for (const photo of gallery.photos) {
+            if (photo.position !== photos.length + 1 || mediaIds.has(photo.mediaId)) throw new Error("Archello \u76F8\u518C\u4F4D\u7F6E\u6216\u7167\u7247 ID \u91CD\u590D\u3001\u4E0D\u8FDE\u7EED");
+            mediaIds.add(photo.mediaId);
+            photos.push(photo);
+            if (photos.length > 1e3) throw new Error("Archello \u76F8\u518C\u56FE\u7247\u8D85\u8FC7\u4E0A\u9650");
+          }
+          galleryUrl = gallery.nextPage;
+        }
         for (const photo of photos) {
           allMedia.add(photo.url);
           progress(`\u6536\u96C6 Archello ${category} ${photo.position}/${photos.length}`);
@@ -787,13 +847,14 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
   function preferredDwellText(...values) {
     return values.find((value) => value.status === "present") || values.find((value) => value.status === "empty") || values[0];
   }
-  function dwellContentNode(node) {
+  function dwellContentNode(node, preservePhotoReferences = false) {
     if (!node) return null;
     const clone = node.cloneNode(true);
     for (const child of clone.querySelectorAll("script, style, button, select, input, textarea, svg, iframe, img, nav, footer")) child.remove();
     for (const child of [clone, ...clone.querySelectorAll("*")]) {
       for (const attribute of [...child.attributes]) {
-        if (!["href", "title"].includes(attribute.name)) child.removeAttribute(attribute.name);
+        const photoReference = preservePhotoReferences && child.tagName === "FIGURE" && attribute.name === "data-archive-photo-id" && /^\d+$/.test(attribute.value);
+        if (!["href", "title"].includes(attribute.name) && !photoReference) child.removeAttribute(attribute.name);
       }
       if (child.hasAttribute("href")) {
         try {
@@ -1039,7 +1100,7 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
       const caption = fields.match(/\bcaption="([\s\S]*?)"(?=\s+(?:layout|credit|photoUserId)="|\s*$)/i)?.[1];
       if (!id || /\bcaption=/.test(fields) && caption === void 0) issues.push("\u6587\u7AE0\u56FE\u7247\u6807\u8BB0\u65E0\u6CD5\u5B8C\u6574\u89E3\u6790");
       inlinePhotos.push({ id, caption });
-      return "";
+      return id ? `<figure data-archive-photo-id="${id}"></figure>` : "";
     });
     if (/<dwell-photo\b/i.test(bodyHtml)) issues.push("\u6587\u7AE0\u5305\u542B\u672A\u89E3\u6790\u7684\u56FE\u7247\u6807\u8BB0");
     content.innerHTML = bodyHtml;
@@ -1117,10 +1178,10 @@ html[data-archive-site="dezeen"] #preload-hero.hero-image {
       const value = label === "Location" ? metadata.title : metadata.value;
       if (label && ["string", "number"].includes(typeof value)) information.push({ label, value: String(value) });
     }
-    const clean = dwellContentNode(content);
+    const clean = dwellContentNode(content, true);
     let body = dwellAttribute(attributes, "body", "state.story.body");
     if (body.status !== "missing") {
-      body = dwellText(clean.textContent.trim() ? clean.innerHTML : "", "state.story.body", "html");
+      body = dwellText(clean.textContent.trim() || clean.querySelector("figure[data-archive-photo-id]") ? clean.innerHTML : "", "state.story.body", "html");
       if (attributes.lead) {
         const lead = page.createElement("p");
         lead.textContent = attributes.lead;
