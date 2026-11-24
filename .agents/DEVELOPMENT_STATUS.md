@@ -1,5 +1,15 @@
 # Development Status
 
+## 2026-11-24 | Phase: Dezeen 文章共享图集弹窗修复 | Status: 完成
+
+- **目标**: 修复 Open Byre 页面误报 `Dezeen gallery lightbox is not loaded`，保留当前文章完整图片及图注。
+- **证据**: 页面将 `#article-lightbox` 放在文章节点外；21 张图库缩略图与头图、正文中的另外 3 张图片共用含 24 张图片的弹窗。现有查找仅限文章节点，且完整性检查假设单个图库覆盖整个弹窗。
+- **变更**: `server/scraper.py` 仅按当前文章图库显式关联从完整文档查找弹窗；共享 `#article-lightbox` 的每张图片必须出现在待归档头图或清洗、展开后的正文中，独立图库继续逐个严格核对。新增 `server/fixtures/dezeen-shared-lightbox.html` 和 4 项回归，覆盖外置共享弹窗、多图集与克隆、缺失或不匹配图片、推荐内容无法填补缺图；同步 server/README.md。
+- **验证**: 57 项 Python、72 项 JS 测试、构建、脚本语法和 git diff --check 通过。Open Byre 公开 HTML 解析得到 Open Byre / ConForm、24 张唯一图片，与共享弹窗图片集合完全相等；正文 25 个图片引用对应 23 张图片且全部指向下载清单，保留 Ground floor plan、First floor plan 图注与末段摄影署名。Minimalist House 公开页面继续解析为 44 张图片及 4 条 Plan/Section 图注。
+- **服务更新**: 确认已有任务均已结束后更新现有常驻后端；新进程健康检查正常，端口只有一个监听进程。用户脚本未修改，无需重新安装。
+- **边界**: 使用公开 HTML 与合成回归验证，未执行真实完整下载或付费模型调用，未修改 projects/。
+- **下一步**: 在 Open Byre 页面重新抓取。
+
 ## 2026-11-07 | Phase: Dezeen 改版、归档修复与服务更新 | Status: 完成
 
 - **目标**: 兼容新版 Dezeen 正文、头图和完整图集，移除顶部广告、Recommended stories 与订阅栏，保留单独查看讨论区。

@@ -260,12 +260,12 @@ def _figure_image_url(fig) -> Optional[str]:
     return _image_url(fig.find("img"))
 
 
-def _prepare_dezeen_body(soup: BeautifulSoup) -> Optional[Tag]:
+def _prepare_dezeen_body(article_root: Tag, document: BeautifulSoup) -> Optional[Tag]:
     """Copy the article body and expand sliders without their modal copies."""
-    body = soup.select_one(DEZEEN_BODY_SELECTOR)
+    body = article_root.select_one(DEZEEN_BODY_SELECTOR)
     if body is None:
-        if ("single-content__entry" in (soup.get("class") or [])
-                or soup.select_one(".single-hero")):
+        if ("single-content__entry" in (article_root.get("class") or [])
+                or article_root.select_one(".single-hero")):
             raise ValueError("Dezeen article body is missing or not loaded")
         return None
     body_copy = BeautifulSoup(str(body), "lxml").select_one(DEZEEN_BODY_SELECTOR)
@@ -295,7 +295,9 @@ def _prepare_dezeen_body(soup: BeautifulSoup) -> Optional[Tag]:
             figure = slide.find("figure")
             if target.startswith("#"):
                 if target not in modal_images:
-                    modal = soup.find(id=target[1:])
+                    # Article-wide lightboxes can be siblings of the article.
+                    # Only look up the target explicitly linked by its slider.
+                    modal = document.find(id=target[1:])
                     if modal is None:
                         raise ValueError("Dezeen gallery lightbox is not loaded")
                     modal_images[target] = {}
@@ -316,9 +318,19 @@ def _prepare_dezeen_body(soup: BeautifulSoup) -> Optional[Tag]:
                 figure.append(deepcopy(img))
             expanded.append(deepcopy(figure))
         for target, matched in matched_modal_images.items():
-            if matched != set(modal_images[target]):
+            if target != "#article-lightbox" and matched != set(modal_images[target]):
                 raise ValueError("Dezeen gallery is incomplete compared with its lightbox")
         slider.replace_with(expanded)
+    if "#article-lightbox" in modal_images:
+        # This shared modal includes hero/inline images as well as every slider.
+        # Count only figures we will archive, after removing unrelated content.
+        figures = body_copy.select("figure")
+        hero = article_root.select_one(".single-hero")
+        if hero:
+            figures.extend(hero.select("figure"))
+        article_images = {_figure_image_url(figure) for figure in figures}
+        if set(modal_images["#article-lightbox"]) - article_images:
+            raise ValueError("Dezeen gallery is incomplete compared with its lightbox")
     if ("single-content__content" in body.get("class", [])
             and not body_copy.get_text(strip=True) and not body_copy.find("img")):
         raise ValueError("Dezeen article body is empty or not loaded")
@@ -482,7 +494,7 @@ def parse_dezeen_article(url: str, html: str) -> ParsedArticle:
     soup = BeautifulSoup(html, "lxml")
     article_root = soup.select_one("article.single-content__entry") or soup
     title = _extract_title(soup)
-    body = _prepare_dezeen_body(article_root)
+    body = _prepare_dezeen_body(article_root, soup)
     building, studio = _split_building_studio(title, url, soup)
     images = _extract_images(article_root, body)
     # Build a canonical-URL -> local-filename map so we can rewrite body figures.

@@ -266,6 +266,85 @@ class ArticleParsingTests(unittest.TestCase):
         self.assertNotIn('different story', article.content_md)
         self.assertIn('images/01 - Outside.jpg', article.content_md)
 
+    def test_dezeen_shared_lightbox_includes_hero_body_and_gallery(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-shared-lightbox.html').read_text()
+        article = parse_article('https://www.dezeen.com/2026/11/18/sample/', html)
+        self.assertEqual(article.building, 'Sample Barn')
+        self.assertEqual(article.studio, 'Example Studio')
+        self.assertEqual([image.url.rsplit('/', 1)[-1] for image in article.images],
+                         ['hero.jpg', 'lead.jpg', 'plan.jpg', 'section.jpg', 'gallery.jpg', 'tail.jpg'])
+        self.assertEqual([image.caption for image in article.images],
+                         [None, 'The entrance courtyard', 'Ground floor plan', 'Section',
+                          'The living space', 'The garden elevation'])
+        ordered = ['A barn adapted around its old walls.', 'images/02 - The entrance courtyard.jpg',
+                   '### Drawings and photography', 'images/03 - Ground floor plan.jpg',
+                   'images/04 - Section.jpg', 'images/05 - The living space.jpg',
+                   'The extension opens onto the garden.', 'images/06 - The garden elevation.jpg',
+                   'Photography by Example Photographer.']
+        self.assertEqual(sorted(article.content_md.index(part) for part in ordered),
+                         [article.content_md.index(part) for part in ordered])
+        self.assertEqual(article.content_md.count('images/05 - The living space.jpg'), 2)
+        for unwanted in ['Wrong project', 'Recommended', 'sidebar.jpg', 'foreign.jpg', 'Previous', 'Next', 'Close']:
+            self.assertNotIn(unwanted, article.content_md)
+
+    def test_dezeen_shared_lightbox_rejects_missing_or_unmatched_images(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-shared-lightbox.html').read_text()
+        for mode in ['missing-modal', 'empty-modal', 'missing-modal-image', 'missing-modal-url',
+                     'wrong-modal-image', 'partial-gallery', 'missing-hero', 'missing-body-image',
+                     'foreign-modal-image']:
+            with self.subTest(mode=mode):
+                soup = BeautifulSoup(html, 'lxml')
+                modal = soup.select_one('#article-lightbox')
+                if mode == 'missing-modal':
+                    modal.decompose()
+                elif mode == 'empty-modal':
+                    modal.clear()
+                elif mode == 'missing-modal-image':
+                    modal.select('figure')[2].decompose()
+                elif mode == 'missing-modal-url':
+                    modal.select('img')[2].attrs.clear()
+                elif mode == 'wrong-modal-image':
+                    modal.select('img')[2].attrs = {'src': 'https://static-2026.dezeen.com/wrong.jpg'}
+                elif mode == 'partial-gallery':
+                    soup.select_one('.gallery-slider__slide').decompose()
+                elif mode == 'missing-hero':
+                    soup.select_one('.single-hero figure').decompose()
+                elif mode == 'missing-body-image':
+                    soup.select_one('.single-content__content > figure').decompose()
+                else:
+                    modal.append(copy.deepcopy(soup.select_one('#unrelated-lightbox figure')))
+                with self.assertRaisesRegex(ValueError, 'Dezeen'):
+                    parse_article('https://www.dezeen.com/2026/11/18/sample/', str(soup))
+
+    def test_dezeen_shared_lightbox_cannot_use_recommendations_to_fill_missing_images(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-shared-lightbox.html').read_text()
+        for selector in ['.related-story', '.single-content__aside', '.dez-recommendations', '#unrelated-lightbox']:
+            with self.subTest(selector=selector):
+                soup = BeautifulSoup(html, 'lxml')
+                slide = soup.select_one('.gallery-slider__slide')
+                figure = soup.new_tag('figure')
+                figure.append(slide.find('img').extract())
+                soup.select_one(selector).append(figure)
+                slide.decompose()
+                with self.assertRaisesRegex(ValueError, 'incomplete'):
+                    parse_article('https://www.dezeen.com/2026/11/18/sample/', str(soup))
+
+    def test_dezeen_multiple_sliders_can_share_article_lightbox(self):
+        html = Path(__file__).with_name('fixtures').joinpath('dezeen-shared-lightbox.html').read_text()
+        soup = BeautifulSoup(html, 'lxml')
+        slider = soup.select_one('.gallery-slider__slider')
+        second_slider = copy.deepcopy(slider)
+        second_slider.select_one('ul').clear()
+        for slide in slider.select('.gallery-slider__slide')[1:]:
+            second_slider.select_one('ul').append(slide.extract())
+        # Browser slider clones do not create duplicate downloads.
+        second_slider.select_one('ul').append(copy.deepcopy(second_slider.select_one('li')))
+        slider.insert_after(second_slider)
+        article = parse_article('https://www.dezeen.com/2026/11/18/sample/', str(soup))
+        self.assertEqual(len(article.images), 6)
+        self.assertEqual(article.content_md.count('images/03 - Ground floor plan.jpg'), 1)
+        self.assertEqual(article.content_md.count('images/04 - Section.jpg'), 1)
+
     def test_dezeen_gallery_clones_and_unrelated_projects_cannot_change_capture(self):
         html = Path(__file__).with_name('fixtures').joinpath('dezeen-redesign.html').read_text()
         soup = BeautifulSoup(html, 'lxml')

@@ -5,7 +5,7 @@
 ### Dezeen 改版支持（2026-11-07.1）
 
 - 兼容新版 `.single-content__content` 正文、`.single-hero` 头图与 `.gallery-slider__slider` 图片清单，继续支持旧版 `.main-article-body` 和 lightbox 图片。
-- 按当前图集显式关联的弹窗匹配图片大图与图注；头图、正文、图集按规范化 URL 去重下载，保留正文中的图片位置和图纸说明。正文推荐文章、分享按钮与弹窗控制文字不写入 Markdown；未加载的正文、图集或不匹配的弹窗会报错。
+- 按当前图集显式关联的弹窗匹配图片大图与图注，支持文章节点外的共享 `#article-lightbox`；共享弹窗按头图、正文及所有图集核对完整图片，独立图库仍逐个核对。头图、正文、图集按规范化 URL 去重下载，保留正文中的图片位置和图纸说明。正文推荐文章、分享按钮与弹窗控制文字不写入 Markdown；未加载的正文、图集或不匹配的弹窗会报错。
 - 浏览器隐藏顶部 `.top-advert.superhero`、Recommended stories 和 `.dcm-bar`，继续提供「单独查看讨论区」，也支持讨论区 iframe 延迟加载。
 - 需按下文运维方式重启已有后端服务，再从 `/script.user.js` 更新 Tampermonkey 脚本并刷新文章页。
 
